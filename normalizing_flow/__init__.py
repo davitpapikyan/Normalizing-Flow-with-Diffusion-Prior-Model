@@ -15,13 +15,24 @@ from aim import Distribution
 
 
 # TODO: Add variational dequatization.
-# TODO: Add docstrings to every script.
 # TODO: Test everything!
 # TODO (on hold): Add different metrics like FID.
 
 
 @torch.no_grad()
 def evalueate(flow, data_loader, imp_samples, bpd_const, device):
+    """Evaluating normalizing flow with importance sampling.
+
+    Args:
+        flow: Normalizing flow model.
+        data_loader: The data loader.
+        imp_samples: The number of samples to genreate.
+        bpd_const: Bits per dimension constant.
+        device: Device.
+
+    Returns:
+        Negative log-likelihood and bit per dim. values.
+    """
     flow.eval()
     nll = 0.0
 
@@ -46,6 +57,30 @@ def evalueate(flow, data_loader, imp_samples, bpd_const, device):
 def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, batch_size, num_workers, optim_name, lr,
           n_epochs, val_freq, print_freq, save_checkpoint_freq, device, checkpoint_dir, num_imp_samples, result_dir,
           resume_info: dict, img_size: int = 32):
+    """Trains the normalizing flow model, runs validation steps and test step.
+
+    Args:
+        flow: Normalizing flow model.
+        logger: The logger.
+        experiment_name: The name of the experiment to run.
+        exp_output_dir: The output directory of the experiment.
+        data_root: The directory of datasets stored.
+        data_name: Which data to load.
+        batch_size: How many samples per batch to load.
+        num_workers: How many subprocesses to use for data loading.
+        optim_name: The optimizer name.
+        lr: The learning rate.
+        n_epochs: The number of epochs to train.
+        val_freq: The number of epoch per to run validation step.
+        print_freq: The number of iterations per to log the training results.
+        save_checkpoint_freq: The number of epochs per to save the normalizing flow model.
+        device: Device.
+        checkpoint_dir: The directory for saving the normalizing flow model.
+        num_imp_samples: The number of samples to generate in importance sampling.
+        result_dir: The directroy for storing generated samples.
+        resume_info: A dict containing info about from which directory to load the saved model and from which epoch.
+        img_size: The image size to resize.
+    """
 
     train_transform = vision_tranforms.Compose([
             vision_tranforms.Resize((img_size, img_size)),

@@ -10,7 +10,7 @@ To run the project open terminal and run the following command:
 python main.py hydra.job.chdir=True
 ```
 
-To open the dashboard with loss visualization and generated sampples run the following command:
+To open the dashboard with loss visualization and generated samples run the following command:
 ```console
 cd ./outputs/nf_experiments/aim
 aim up

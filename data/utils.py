@@ -47,7 +47,7 @@ class MapDataset(Dataset):
         return len(self.dataset)
 
 
-@torch.jit.script  # TODO: Check if this makes iterations faster on server with GPU.
+# TODO: Check if @torch.jit.script applied introduces speedup or not.
 def discretize(img):
     """The opposite transformation of torchvision.transforms.ToTensor().
 

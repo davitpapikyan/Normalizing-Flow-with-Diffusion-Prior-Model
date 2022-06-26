@@ -267,7 +267,7 @@ class Glow(Transform):
         return new_samples.float(), log_likelihood
 
 
-# TODO: Check if @torch.jit applied on transform, invert, sigmoid and dequant introduce speedup or not.
+# TODO: Check if @torch.jit.script applied on transform, invert, sigmoid and dequant introduce speedup or not.
 class Dequantization(Transform):
 
     def __init__(self, alpha=1e-5, quants=256):
