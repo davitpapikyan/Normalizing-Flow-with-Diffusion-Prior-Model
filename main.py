@@ -7,9 +7,10 @@ from omegaconf import DictConfig, OmegaConf
 from normalizing_flow import Glow, train
 from utils import setup_logger, set_seeds
 
+# import argparse
 
-# TODO: Check https://hydra.cc/docs/next/tutorials/basic/running_your_app/working_directory/#disable-changing-current-working-dir-to-jobs-output-dir
-@hydra.main(config_path="./configs", config_name="nf_base_configs")
+
+@hydra.main(config_path="./configs", config_name="nf_base_configs", version_base="1.1")
 def main(configs: DictConfig):
     workdir = os.getcwd()  # The experiment directory in hydra-outputs.
 
@@ -17,11 +18,11 @@ def main(configs: DictConfig):
     logger.info(f"The working directory is {workdir}")
     logger.info(OmegaConf.to_yaml(configs))
 
+    torch.backends.cudnn.enabled = True
     torch.backends.cudnn.benchmark = True
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     flow = Glow(L=configs.model.architecture.L, K=configs.model.architecture.K)
-    flow.to(device)
+    flow.to(flow.device)
 
     if not configs.resume.resume_exp_dir:  # If the training startes from scratch.
         logger.info("Glow model is created.")
@@ -50,7 +51,7 @@ def main(configs: DictConfig):
           optim_name=configs.model.optimizer.type, lr=configs.model.optimizer.lr,
           n_epochs=configs.model.training.epochs, val_freq=configs.model.training.val_freq,
           print_freq=configs.model.training.print_freq,
-          save_checkpoint_freq=configs.model.training.save_checkpoint_freq, device=device,
+          save_checkpoint_freq=configs.model.training.save_checkpoint_freq, device=flow.device,
           checkpoint_dir=checkpoint_dir, num_imp_samples=configs.model.testing.num_imp_samples,
           result_dir=result_dir, resume_info=resume_info)
 
@@ -59,5 +60,10 @@ def main(configs: DictConfig):
 
 
 if __name__ == "__main__":
+    # parser = argparse.ArgumentParser()
+    # parser.add_argument("--hydra.job.chdir", type=bool, help="Set True for Hydra to create a new working directory.",
+    #                     nargs='?', default=True, const=True)
+    # args = parser.parse_args()
+
     set_seeds()  # For reproducability.
     main()

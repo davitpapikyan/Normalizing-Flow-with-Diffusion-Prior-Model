@@ -41,7 +41,7 @@ class StepFlow(Transform):
             y: Forward transformed input.
             log_det_jac: log abs determinant of jacobian matrix of the transformation.
         """
-        log_det_jac = torch.zeros(x.size(0))
+        log_det_jac = torch.zeros(x.size(0), device=self.device)
 
         y, log_det_jac1 = self.actnorm.transform(x)
         y, log_det_jac2 = self.invconv2d.transform(y)
@@ -60,7 +60,7 @@ class StepFlow(Transform):
             inv_y: Inverse transformed input.
             inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
         """
-        inv_log_det_jac = torch.zeros(y.size(0))
+        inv_log_det_jac = torch.zeros(y.size(0), device=self.device)
 
         inv_y, inv_log_det_jac1 = self.affcoupling.invert(y)
         inv_y, inv_log_det_jac2 = self.invconv2d.invert(inv_y)
@@ -102,7 +102,7 @@ class GlowBlock(Transform):
             y: Forward transformed input.
             log_det_jac: log abs determinant of jacobian matrix of the transformation.
         """
-        log_det_jac = torch.zeros(x.size(0))
+        log_det_jac = torch.zeros(x.size(0), device=self.device)
 
         # Squeeze.
         y, log_det_jac_squeeze = self.squeeze.transform(x)
@@ -129,7 +129,7 @@ class GlowBlock(Transform):
             inv_y: Inverse transformed input.
             inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
         """
-        inv_log_det_jac = torch.zeros(y.size(0))
+        inv_log_det_jac = torch.zeros(y.size(0), device=self.device)
 
         # Split.
         inv_y, inv_log_det_jac_split = self.split.invert(y)
@@ -170,7 +170,7 @@ class Glow(Transform):
         self.in_channel = in_channel
 
         # self.dequant = Dequantization()
-        self.dequant = VariationalDequantization()
+        self.dequant = Dequantization()  # VariationalDequantization()
         self.blocks = nn.ModuleList(GlowBlock(in_channels=(2**i * self.in_channel), K=self.K)
                                     for i in range(self.L-1))
         self.final_squeeze = Squeeze()
@@ -188,7 +188,7 @@ class Glow(Transform):
             y: Forward transformed input.
             log_det_jac: log abs determinant of jacobian matrix of the transformation.
         """
-        log_det_jac = torch.zeros(x.size(0))
+        log_det_jac = torch.zeros(x.size(0), device=self.device)
 
         # Dequantization.
         y, log_det_jac_dequant = self.dequant.transform(x)
@@ -223,7 +223,7 @@ class Glow(Transform):
             inv_y: Inverse transformed input.
             log_likelihood:
         """
-        log_likelihood = torch.zeros(y.size(0))
+        log_likelihood = torch.zeros(y.size(0), device=self.device)
 
         log_p = self.__prior.compute_log_prob(y)
         log_likelihood += log_p
@@ -261,15 +261,13 @@ class Glow(Transform):
         self.eval()
         in_height, in_width = img_shape
         n_channels, out_height, out_width = self.get_output_shape(in_height, in_width)
-        z = self.__prior.sample((n_samples, n_channels, out_height, out_width))
+        z = self.__prior.sample((n_samples, n_channels, out_height, out_width)).to(self.device)
         new_samples, log_likelihood = self.invert(z)
         self.train()
         return new_samples.float(), log_likelihood
 
 
-
-
-###################################################
+# TODO: Check if @torch.jit applied on transform, invert, sigmoid and dequant introduce speedup or not.
 class Dequantization(Transform):
 
     def __init__(self, alpha=1e-5, quants=256):
@@ -320,37 +318,37 @@ class Dequantization(Transform):
         return z, ldj
 
 
-class VariationalDequantization(Dequantization):
-
-    def __init__(self, alpha=1e-5):
-        """
-        Inputs:
-            var_flows - A list of flow transformations to use for modeling q(u|x)
-            alpha - Small constant, see Dequantization for details
-        """
-        super().__init__(alpha=alpha)
-        # TODO: work on self.flows.
-        self.flows = nn.ModuleList([GlowBlock(3, 2)])
-
-    def dequant(self, z):
-        z = z.to(torch.float32)
-
-        # Prior of u is a uniform distribution as before
-        # As most flow transformations are defined on [-infinity,+infinity], we apply an inverse sigmoid first.
-
-        deq_noise = torch.rand_like(z).detach()
-        deq_noise, ldj = self.sigmoid(deq_noise, reverse=True)
-
-        print(deq_noise.shape)
-        for flow in self.flows:
-            deq_noise, logdet = flow.transform(deq_noise)
-            ldj += logdet
-        print(deq_noise.shape)
-
-        deq_noise, logdet = self.sigmoid(deq_noise)
-        ldj += logdet
-
-        # After the flows, apply u as in standard dequantization
-        z = (z + deq_noise) / 256.0
-        ldj -= np.log(256.0) * np.prod(z.shape[1:])
-        return z, ldj
+# class VariationalDequantization(Dequantization):
+#
+#     def __init__(self, alpha=1e-5):
+#         """
+#         Inputs:
+#             var_flows - A list of flow transformations to use for modeling q(u|x)
+#             alpha - Small constant, see Dequantization for details
+#         """
+#         super().__init__(alpha=alpha)
+#         # TODO: work on self.flows.
+#         self.flows = nn.ModuleList([GlowBlock(3, 2)])
+#
+#     def dequant(self, z):
+#         z = z.to(torch.float32)
+#
+#         # Prior of u is a uniform distribution as before
+#         # As most flow transformations are defined on [-infinity,+infinity], we apply an inverse sigmoid first.
+#
+#         deq_noise = torch.rand_like(z).detach()
+#         deq_noise, ldj = self.sigmoid(deq_noise, reverse=True)
+#
+#         print(deq_noise.shape)
+#         for flow in self.flows:
+#             deq_noise, logdet = flow.transform(deq_noise)
+#             ldj += logdet
+#         print(deq_noise.shape)
+#
+#         deq_noise, logdet = self.sigmoid(deq_noise)
+#         ldj += logdet
+#
+#         # After the flows, apply u as in standard dequantization
+#         z = (z + deq_noise) / 256.0
+#         ldj -= np.log(256.0) * np.prod(z.shape[1:])
+#         return z, ldj

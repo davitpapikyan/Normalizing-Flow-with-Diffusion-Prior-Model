@@ -1,9 +1,9 @@
 import os
 
 import pandas as pd
+import torch
 from skimage import io
 from torch.utils.data import Dataset
-import torch
 from torchvision.transforms import ToPILImage
 
 
@@ -47,6 +47,7 @@ class MapDataset(Dataset):
         return len(self.dataset)
 
 
+@torch.jit.script  # TODO: Check if this makes iterations faster on server with GPU.
 def discretize(img):
     """The opposite transformation of torchvision.transforms.ToTensor().
 

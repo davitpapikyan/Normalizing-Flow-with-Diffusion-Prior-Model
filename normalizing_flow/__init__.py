@@ -30,7 +30,7 @@ def evalueate(flow, data_loader, imp_samples, bpd_const, device):
 
         samples = []
         for _ in range(imp_samples):  # Importance sampling.
-            _, ll = flow.transform(batch)  # TODO: why transform produces random ll?
+            _, ll = flow.transform(batch)
             samples.append(ll)
 
         log_likelihoods = torch.stack(samples)
@@ -47,15 +47,14 @@ def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, b
           n_epochs, val_freq, print_freq, save_checkpoint_freq, device, checkpoint_dir, num_imp_samples, result_dir,
           resume_info: dict, img_size: int = 32):
 
-    # TODO: Check if you can remove ToTensor and discretize
     train_transform = vision_tranforms.Compose([
-            vision_tranforms.Resize(img_size),
+            vision_tranforms.Resize((img_size, img_size)),
             # vision_tranforms.RandomHorizontalFlip(),
             vision_tranforms.ToTensor(),
             discretize
     ])
     test_transform = vision_tranforms.Compose([
-            vision_tranforms.Resize(img_size),
+            vision_tranforms.Resize((img_size, img_size)),
             vision_tranforms.ToTensor(),
             discretize
     ])
@@ -100,7 +99,10 @@ def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, b
         for iteration, data in enumerate(train_loader):
 
             batch = data[0].to(device) if isinstance(data, list) else data.to(device)
-            optimizer.zero_grad()
+
+            # Setting gradients to None which reduced the number of memory operations than model.zero_grad().
+            for param in flow.parameters():
+                param.grad = None
 
             _, log_likelihood = flow.transform(batch)
 
@@ -130,7 +132,6 @@ def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, b
                 running_loss = 0.0
 
         # Saving the model.
-        # TODO: https://pytorch.org/tutorials/beginner/saving_loading_models.html#saving-loading-a-general-checkpoint-for-inference-and-or-resuming-training
         if epoch % save_checkpoint_freq == save_checkpoint_freq-1:
             logger.info("Saving the model.")
             torch.save({

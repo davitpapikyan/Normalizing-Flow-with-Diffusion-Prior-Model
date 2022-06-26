@@ -1,9 +1,8 @@
-import numpy as np
 import torch
 import torch.nn as nn
 from einops import rearrange
 from torch.distributions import Normal
-from torch.nn.functional import conv2d, softplus
+from torch.nn.functional import conv2d
 
 from .base import Transform
 from .utils import coupling_network, abs_log_sum
@@ -91,7 +90,7 @@ class InvConv2d(Transform):
             in_channels: The number of channels of an input image.
         """
         super(InvConv2d, self).__init__()
-        random_matrix = torch.randn(size=(in_channels, in_channels), dtype=torch.float32)
+        random_matrix = torch.randn(size=(in_channels, in_channels), dtype=torch.float32, device=self.device)
         w_init, _ = torch.linalg.qr(random_matrix)
         self.weight = nn.Parameter(rearrange(w_init, "h w -> h w () ()"))
 
@@ -152,7 +151,7 @@ class InvConv2dLU(Transform):
         # Using Q matrix from the QR decomposition of a random matrix as the initial
         # value of weight to make sure it is invertible.
 
-        random_matrix = torch.randn(size=(in_channels, in_channels), dtype=torch.float32)
+        random_matrix = torch.randn(size=(in_channels, in_channels), dtype=torch.float32, device=self.device)
         w_init, _ = torch.linalg.qr(random_matrix)
 
         # Constructing P, L, U matrices and s vector for efficient
@@ -284,10 +283,9 @@ class AffineCoupling(Transform):
         Args:
             in_channels: The number of input channels of coupling network.
             n_features: The number of hidden feature maps of the network.
-            keep_dims:
         """
         super(AffineCoupling, self).__init__()
-        self.net = coupling_network(in_channels=in_channels, n_features=n_features)
+        self.net = coupling_network(in_channels=in_channels, n_features=n_features).to(self.device)
         self.scaling_factor = nn.Parameter(torch.zeros(in_channels))
 
     def transform(self, x: torch.tensor):
@@ -301,7 +299,6 @@ class AffineCoupling(Transform):
             log_det_jac: log abs determinant of jacobian matrix of the transformation.
         """
         x_a, x_b = x.chunk(2, dim=1)
-
 
         log_scale, bias = self.net(x_a).chunk(2, dim=1)
         # scale = torch.sigmoid(log_scale+2)
@@ -326,7 +323,6 @@ class AffineCoupling(Transform):
         """
         y_a, y_b = y.chunk(2, dim=1)
         log_scale, bias = self.net(y_a).chunk(2, dim=1)
-        # scale = torch.sigmoid(log_scale+2)
 
         s_fac = self.scaling_factor.exp().view(1, -1, 1, 1)
         scale = torch.tanh(log_scale / s_fac) * s_fac
@@ -444,7 +440,3 @@ class Split(Transform):
         inv_y = torch.concat([y, inv_y_split], dim=1)
         inv_log_det_jac = -self.__prior.compute_log_prob(inv_y_split)
         return inv_y, inv_log_det_jac
-
-
-# TODO: Refine the code below.
-############################################################################################################

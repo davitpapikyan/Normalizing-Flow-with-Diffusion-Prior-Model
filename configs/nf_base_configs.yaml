@@ -11,7 +11,7 @@ resume:
   resume_epoch: 0  # How many epochs the model has been trained.
 
 data:
-  name: "CIFAR10"  # One of ['CelebA', 'CIFAR10'].
+  name: "CelebA"  # One of ['CelebA', 'CIFAR10'].
   root: "/Users/davit/Desktop/thesis/experiments/data"
   batch_size: 16
   num_workers: 0

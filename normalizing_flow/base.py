@@ -10,6 +10,7 @@ class Transform(nn.Module, ABC):
 
     def __init__(self):
         super(Transform, self).__init__()
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     @abstractmethod
     def transform(self, x: torch.tensor):

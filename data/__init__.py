@@ -1,16 +1,15 @@
 import logging
 import os
-from typing import Tuple
 from sys import platform
+from typing import Tuple
 
 import numpy as np
 from sklearn.model_selection import train_test_split
 from torch.utils.data import DataLoader, Subset
 from torchvision.datasets import CIFAR10
 from torchvision.transforms import Compose
-from .utils import discretize
 
-from .utils import CelebA, MapDataset, set_start_method_for_darwin
+from .utils import discretize, CelebA, MapDataset, set_start_method_for_darwin
 
 
 def get_cifar10_dataloaders(*, root: str, batch_size: int = 4, num_workers: int = 1,
