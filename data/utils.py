@@ -4,6 +4,7 @@ import pandas as pd
 from skimage import io
 from torch.utils.data import Dataset
 import torch
+from torchvision.transforms import ToPILImage
 
 
 class CelebA(Dataset):
@@ -12,6 +13,7 @@ class CelebA(Dataset):
     def __init__(self, data_dir, partition_file_path, split, transform):
         self.partition_file = pd.read_csv(partition_file_path)
         self.data_dir, self.transform = data_dir, transform
+        self.convert_to_PIL = ToPILImage()
         self.partition_file_sub = self.partition_file[self.partition_file["partition"].isin(split)]
 
     def __len__(self):
@@ -19,7 +21,8 @@ class CelebA(Dataset):
 
     def __getitem__(self, idx: int):
         img_name = os.path.join(self.data_dir, self.partition_file_sub.iloc[idx, 0])
-        return self.transform(io.imread(img_name)) if self.transform else io.imread(img_name)
+        pil_img = self.convert_to_PIL(io.imread(img_name))
+        return self.transform(pil_img) if self.transform else pil_img
 
 
 class MapDataset(Dataset):
@@ -45,7 +48,17 @@ class MapDataset(Dataset):
 
 
 def discretize(img):
+    """The opposite transformation of torchvision.transforms.ToTensor().
+
+    Args:
+        img: Input image.
+
+    Returns:
+        Discretized tesnor image.
+    """
     return (img * 255).to(torch.int32)
 
 
-__all__ = [CelebA, MapDataset]
+def set_start_method_for_darwin():
+    import multiprocessing
+    multiprocessing.set_start_method("fork")

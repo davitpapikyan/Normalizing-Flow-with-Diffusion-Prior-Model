@@ -1,6 +1,7 @@
 import logging
 import os
 from typing import Tuple
+from sys import platform
 
 import numpy as np
 from sklearn.model_selection import train_test_split
@@ -9,7 +10,7 @@ from torchvision.datasets import CIFAR10
 from torchvision.transforms import Compose
 from .utils import discretize
 
-from .utils import CelebA, MapDataset
+from .utils import CelebA, MapDataset, set_start_method_for_darwin
 
 
 def get_cifar10_dataloaders(*, root: str, batch_size: int = 4, num_workers: int = 1,
@@ -23,8 +24,8 @@ def get_cifar10_dataloaders(*, root: str, batch_size: int = 4, num_workers: int 
         root: The path to the data.
         batch_size: How many samples per batch to load.
         num_workers: How many subprocesses to use for data loading.
-        train_transform: Transformations to be applied on train data.
-        test_transform: Transformations to be applied on validation and test data.
+        train_transform: Transformations to be applied on train dataset.
+        test_transform: Transformations to be applied on validation and test datasets.
         pin_memory: If True, the data loader will copy Tensors into CUDA pinned memory before returning them.
         verbose: If True provides additional details about the dataset.
 
@@ -75,7 +76,9 @@ def get_celeba_dataloaders(*, root: str, batch_size: int = 4, num_workers: int =
     Returns:
         Training, validation and test dataloaders.
     """
-    to_be_removed()  # TODO: remove this function once you are on linux system.
+    if platform == "darwin":
+        set_start_method_for_darwin()
+
     path_to_data = os.path.join(root, "celeba/img_align_celeba/img_align_celeba")
     path_to_partitions = os.path.join(root, "celeba/list_eval_partition.csv")
     trainset = CelebA(data_dir=path_to_data,
@@ -132,8 +135,3 @@ def read_dataset(*, root: str, name: str, batch_size=4, num_workers=1, train_tra
 
 
 __all__ = [read_dataset, discretize]
-
-# TODO: Remove this function while you are on Linux.
-def to_be_removed():
-    import multiprocessing
-    multiprocessing.set_start_method("fork")
