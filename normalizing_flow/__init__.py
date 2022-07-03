@@ -14,9 +14,8 @@ from .utils import init_optimizer, track_images, save_images
 from aim import Distribution
 
 
-# TODO: Add variational dequatization.
-# TODO: Test everything!
-# TODO (on hold): Add different metrics like FID.
+# TODO (on hold): See which metrics are applied on both glow and diffusion paper. Add different metrics like FID.
+# TODO: (on hold) Add variational dequatization.
 
 
 @torch.no_grad()
@@ -41,7 +40,8 @@ def evalueate(flow, data_loader, imp_samples, bpd_const, device):
 
         samples = []
         for _ in range(imp_samples):  # Importance sampling.
-            _, ll = flow.transform(batch)
+            ll = torch.zeros(batch.size(0), device=device)
+            _, ll = flow.transform(batch, ll)
             samples.append(ll)
 
         log_likelihoods = torch.stack(samples)
@@ -132,14 +132,14 @@ def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, b
     for epoch in range(start_epoch+1, start_epoch+n_epochs+1):
 
         for iteration, data in enumerate(train_loader):
-
             batch = data[0].to(device) if isinstance(data, list) else data.to(device)
 
             # Setting gradients to None which reduced the number of memory operations than model.zero_grad().
             for param in flow.parameters():
                 param.grad = None
 
-            _, log_likelihood = flow.transform(batch)
+            log_likelihood = torch.zeros(batch.size(0), device=device)
+            _, log_likelihood = flow.transform(batch, log_likelihood)
 
             loss = -log_likelihood.mean(dim=0)  # Negative log-likelihood.
             loss.backward()

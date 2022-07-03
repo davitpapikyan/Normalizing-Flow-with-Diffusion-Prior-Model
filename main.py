@@ -7,6 +7,7 @@ from omegaconf import DictConfig, OmegaConf
 from normalizing_flow import Glow, train
 from utils import setup_logger, set_seeds
 
+
 # import argparse
 
 
@@ -45,6 +46,7 @@ def main(configs: DictConfig):
 
     exp_output_dir = workdir.split("/")[-1] if not resume_info else resume_info["dir"]
 
+    # Training the model.
     train(flow, logger=logger, experiment_name=configs.experiment_name, exp_output_dir=exp_output_dir,
           data_root=configs.data.root, data_name=configs.data.name, batch_size=configs.data.batch_size,
           num_workers=configs.data.num_workers, optim_name=configs.model.optimizer.type, lr=configs.model.optimizer.lr,
@@ -53,9 +55,6 @@ def main(configs: DictConfig):
           save_checkpoint_freq=configs.model.training.save_checkpoint_freq, device=flow.device,
           checkpoint_dir=checkpoint_dir, num_imp_samples=configs.model.testing.num_imp_samples, result_dir=result_dir,
           resume_info=resume_info)
-
-
-    # TODO: Write a function to set a model on device. go to you DDPM repo and see the set_device function in model.
 
 
 if __name__ == "__main__":

@@ -1,12 +1,13 @@
+from typing import Tuple
+
+import numpy as np
 import torch
 import torch.nn as nn
+from torch.nn.functional import softplus
 
 from .base import Transform
 from .transforms import ActNorm, InvConv2d, AffineCoupling, Squeeze, Split, Prior
 from .utils import calc_chunk_sizes
-
-import numpy as np
-from torch.nn.functional import softplus
 
 
 class StepFlow(Transform):
@@ -31,42 +32,36 @@ class StepFlow(Transform):
         coupling_net_in_channels, _ = calc_chunk_sizes(in_channels)
         self.affcoupling = AffineCoupling(in_channels=coupling_net_in_channels, n_features=coupling_net_n_features)
 
-    def transform(self, x):
+    def transform(self, x, log_det_jac: torch.tensor):
         """Computes forward transformation and log abs determinant of jacobian matrix.
 
         Args:
             x: Input tensor of shape [B, C, H, W].
+            log_det_jac: Ongoing log abs determinant of jacobian.
 
         Returns:
             y: Forward transformed input.
             log_det_jac: log abs determinant of jacobian matrix of the transformation.
         """
-        log_det_jac = torch.zeros(x.size(0), device=self.device)
-
-        y, log_det_jac1 = self.actnorm.transform(x)
-        y, log_det_jac2 = self.invconv2d.transform(y)
-        y, log_det_jac3 = self.affcoupling.transform(y)
-
-        log_det_jac += log_det_jac1 + log_det_jac2 + log_det_jac3
+        y, log_det_jac = self.actnorm.transform(x, log_det_jac)
+        y, log_det_jac = self.invconv2d.transform(y, log_det_jac)
+        y, log_det_jac = self.affcoupling.transform(y, log_det_jac)
         return y, log_det_jac
 
-    def invert(self, y):
+    def invert(self, y, inv_log_det_jac: torch.tensor):
         """Computes inverse transformation and log abs determinant of jacobian matrix.
 
         Args:
             y: Input tensor of shape [B, C, H, W].
+            inv_log_det_jac: Ongoing log abs determinant of jacobian.
 
         Returns:
             inv_y: Inverse transformed input.
             inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
         """
-        inv_log_det_jac = torch.zeros(y.size(0), device=self.device)
-
-        inv_y, inv_log_det_jac1 = self.affcoupling.invert(y)
-        inv_y, inv_log_det_jac2 = self.invconv2d.invert(inv_y)
-        inv_y, inv_log_det_jac3 = self.actnorm.invert(inv_y)
-
-        inv_log_det_jac += inv_log_det_jac1 + inv_log_det_jac2 + inv_log_det_jac3
+        inv_y, inv_log_det_jac = self.affcoupling.invert(y, inv_log_det_jac)
+        inv_y, inv_log_det_jac = self.invconv2d.invert(inv_y, inv_log_det_jac)
+        inv_y, inv_log_det_jac = self.actnorm.invert(inv_y, inv_log_det_jac)
         return inv_y, inv_log_det_jac
 
 
@@ -92,57 +87,49 @@ class GlowBlock(Transform):
         self.flows = nn.ModuleList([StepFlow(in_channels=flow_channels) for _ in range(K)])
         self.split = Split()
 
-    def transform(self, x: torch.tensor):
+    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
         """Computes forward transformation and log abs determinant of jacobian matrix.
 
         Args:
             x: Input tensor of shape [B, C, H, W].
+            log_det_jac: Ongoing log abs determinant of jacobian matrix.
 
         Returns:
             y: Forward transformed input.
             log_det_jac: log abs determinant of jacobian matrix of the transformation.
         """
-        log_det_jac = torch.zeros(x.size(0), device=self.device)
-
         # Squeeze.
-        y, log_det_jac_squeeze = self.squeeze.transform(x)
-        log_det_jac += log_det_jac_squeeze
+        y, log_det_jac = self.squeeze.transform(x, log_det_jac)
 
         # Step of flow.
         for flow in self.flows:
-            y, log_det_jac_flow = flow.transform(y)
-            log_det_jac += log_det_jac_flow
+            y, log_det_jac = flow.transform(y, log_det_jac)
 
         # Split.
-        y, log_det_jac_split = self.split.transform(y)
-        log_det_jac += log_det_jac_split
+        y, log_det_jac = self.split.transform(y, log_det_jac)
 
         return y, log_det_jac
 
-    def invert(self, y: torch.tensor):
+    def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
         """Computes inverse transformation and log abs determinant of jacobian matrix.
 
         Args:
             y: Input tensor of shape [B, C, H, W].
+            inv_log_det_jac: Ongoing log abs determinant of jacobian.
 
         Returns:
             inv_y: Inverse transformed input.
             inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
         """
-        inv_log_det_jac = torch.zeros(y.size(0), device=self.device)
-
         # Split.
-        inv_y, inv_log_det_jac_split = self.split.invert(y)
-        inv_log_det_jac += inv_log_det_jac_split
+        inv_y, inv_log_det_jac = self.split.invert(y, inv_log_det_jac)
 
         # Step of flow.
         for flow in reversed(self.flows):
-            inv_y, inv_log_det_jac_flow = flow.invert(inv_y)
-            inv_log_det_jac += inv_log_det_jac_flow
+            inv_y, inv_log_det_jac = flow.invert(inv_y, inv_log_det_jac)
 
         # Squeeze.
-        inv_y, inv_log_det_squeeze = self.squeeze.invert(inv_y)
-        inv_log_det_jac += inv_log_det_squeeze
+        inv_y, inv_log_det_jac = self.squeeze.invert(inv_y, inv_log_det_jac)
 
         return inv_y, inv_log_det_jac
 
@@ -178,144 +165,192 @@ class Glow(Transform):
                                          for _ in range(self.K))
         self.__prior = Prior()
 
-    def transform(self, x: torch.tensor):
+    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
         """Computes forward transformation and log abs determinant of jacobian matrix.
 
         Args:
             x: Input tensor of shape [B, C, H, W].
+            log_det_jac: Ongoing log abs determinant of jacobian matrix.
 
         Returns:
             y: Forward transformed input.
             log_det_jac: log abs determinant of jacobian matrix of the transformation.
         """
-        log_det_jac = torch.zeros(x.size(0), device=self.device)
-
         # Dequantization.
-        y, log_det_jac_dequant = self.dequant.transform(x)
-        log_det_jac += log_det_jac_dequant
+        y, log_det_jac_dequant = self.dequant.transform(x, log_det_jac)
 
         # Glow block.
         for block in self.blocks:
-            y, log_det_jac_block = block.transform(y)
-            log_det_jac += log_det_jac_block
+            y, log_det_jac = block.transform(y, log_det_jac)
 
         # Squeeze.
-        y, log_det_jac_squeeze = self.final_squeeze.transform(y)
-        log_det_jac += log_det_jac_squeeze
+        y, log_det_jac = self.final_squeeze.transform(y, log_det_jac)
 
         # Step of flow.
         for flow in self.final_flows:
-            y, log_det_jac_flow = flow.transform(y)
-            log_det_jac += log_det_jac_flow
+            y, log_det_jac = flow.transform(y, log_det_jac)
 
-        log_p = self.__prior.compute_log_prob(y)
-        log_det_jac += log_p
+        log_det_jac += self.__prior.compute_log_prob(y)
 
         return y, log_det_jac
 
-    def invert(self, y: torch.tensor):
+    def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
         """Computes inverse transformation and
 
         Args:
             y: Input tensor of shape [B, C, H, W].
+            inv_log_det_jac: Ongoing log abs determinant of jacobian.
 
         Returns:
             inv_y: Inverse transformed input.
-            log_likelihood:
+            inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
         """
-        log_likelihood = torch.zeros(y.size(0), device=self.device)
-
-        log_p = self.__prior.compute_log_prob(y)
-        log_likelihood += log_p
+        inv_log_det_jac += self.__prior.compute_log_prob(y)
 
         # Step of flow.
         inv_y = y
         for flow in reversed(self.final_flows):
-            inv_y, inv_log_det_jac_flow = flow.invert(inv_y)
-            log_likelihood += inv_log_det_jac_flow
+            inv_y, inv_log_det_jac = flow.invert(inv_y, inv_log_det_jac)
 
         # Squeeze.
-        inv_y, inv_log_det_jac_squeeze = self.final_squeeze.invert(inv_y)
-        log_likelihood += inv_log_det_jac_squeeze
+        inv_y, inv_log_det_jac = self.final_squeeze.invert(inv_y, inv_log_det_jac)
 
         # Glow block.
         for block in reversed(self.blocks):
-            inv_y, log_det_jac_block = block.invert(inv_y)
-            log_likelihood += log_det_jac_block
+            inv_y, inv_log_det_jac = block.invert(inv_y, inv_log_det_jac)
 
         # Dequantization.
-        inv_y, inv_log_det_jac_dequant = self.dequant.invert(inv_y)
-        log_likelihood += inv_log_det_jac_dequant
+        inv_y, inv_log_det_jac = self.dequant.invert(inv_y, inv_log_det_jac)
 
-        return inv_y, log_likelihood
+        return inv_y, inv_log_det_jac
 
-    def get_output_shape(self, height, width):
+    def get_output_shape(self, height: int, width: int):
+        """Calculates the output shape.
+
+        Args:
+            height: The input's height.
+            width: The input's width.
+
+        Returns:
+            A tuple of 3 values representing the number of channels, the height and width of output.
+        """
         const = 2 ** self.L
         n_channels = int(self.in_channel * const * 2)
-        height = int(height / const)
-        width = int(width / const)
+        height, width = int(height / const), int(width / const)
         return n_channels, height, width
 
     @torch.no_grad()
-    def sample(self, n_samples, img_shape):
+    def sample(self, n_samples: int, img_shape: Tuple[int, int]):
+        """Samples from Glow model.
+
+        Args:
+            n_samples: The number of samples to generate.
+            img_shape: The image shape - a tuple containing height and width of input.
+
+        Returns:
+            A tuple of 2 values, the first is a torch.tensor representing sampled data points, the second
+            torch.tensor stores the log likelihoods of those generated samples.
+        """
         self.eval()
         in_height, in_width = img_shape
         n_channels, out_height, out_width = self.get_output_shape(in_height, in_width)
         z = self.__prior.sample((n_samples, n_channels, out_height, out_width)).to(self.device)
-        new_samples, log_likelihood = self.invert(z)
+        log_likelihood = torch.zeros(n_samples, device=self.device)
+        new_samples, log_likelihood = self.invert(z, log_likelihood)
         self.train()
         return new_samples.float(), log_likelihood
 
 
 # TODO: Check if @torch.jit.script applied on transform, invert, sigmoid and dequant introduce speedup or not.
 class Dequantization(Transform):
+    """Image dequantization layer. Take a look at UvA DL Notebooks tutorial - Tutorial 11: Normalizing Flows for
+    image modeling where the below implementation is taken from.
+
+
+    Attributes:
+        alpha: Small constant that is used to scale the original input. Prevents dealing with values very close to 0
+            and 1 when inverting the sigmoid.
+        quants: Number of possible discrete values (usually 256 for 8-bit image).
+    """
 
     def __init__(self, alpha=1e-5, quants=256):
-        """
-        Inputs:
-            alpha - small constant that is used to scale the original input.
-                    Prevents dealing with values very close to 0 and 1 when inverting the sigmoid
-            quants - Number of possible discrete values (usually 256 for 8-bit image)
-        """
+        """Initializes attributes."""
         super().__init__()
         self.alpha = alpha
         self.quants = quants
 
-    def transform(self, x: torch.tensor):
-        log_det_jac = torch.zeros(x.size(0))
-        y, log_det_jac_1 = self.dequant(x)
-        y, log_det_jac_2 = self.sigmoid(y, reverse=True)
-        log_det_jac += log_det_jac_1 + log_det_jac_2
+    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
+        """Computes forward transformation and log abs determinant of jacobian matrix.
+
+        Args:
+            x: Input tensor of shape [B, C, H, W].
+            log_det_jac: Ongoing log abs determinant of jacobian matrix.
+
+        Returns:
+            y: Forward transformed input.
+            log_det_jac: log abs determinant of jacobian matrix of the transformation.
+        """
+        y, log_det_jac = self.dequant(x, log_det_jac)
+        y, log_det_jac = self.sigmoid(y, log_det_jac, reverse=True)
         return y, log_det_jac
 
-    def invert(self, y: torch.tensor):
-        inv_log_det_jac = torch.zeros(y.size(0))
+    def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
+        """Computes inverse transformation and
 
-        inv_y, inv_log_det_jac_1 = self.sigmoid(y, reverse=False)
-        inv_y = inv_y * self.quants
-        inv_log_det_jac += inv_log_det_jac_1 + np.log(self.quants) * np.prod(inv_y.shape[1:])
+        Args:
+            y: Input tensor of shape [B, C, H, W].
+            inv_log_det_jac: Ongoing log abs determinant of jacobian.
+
+        Returns:
+            inv_y: Inverse transformed input.
+            inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
+        """
+        inv_y, inv_log_det_jac = self.sigmoid(y, inv_log_det_jac, reverse=False)
+        inv_y *= self.quants
+        inv_log_det_jac += np.log(self.quants) * np.prod(inv_y.shape[1:])
         inv_y = torch.floor(inv_y).clamp(min=0, max=self.quants - 1).to(torch.int32)
         return inv_y, inv_log_det_jac
 
-    def sigmoid(self, z, reverse=False):
-        # Applies an invertible sigmoid transformation
+    def sigmoid(self, z: torch.tensor, log_det_jac: torch.tensor, reverse=False):
+        """Invertible sigmoid transformation.
+
+        Args:
+            z: Input tensor.
+            log_det_jac: Ongoing log abs determinant of jacobian.
+            reverse: Whetehr to apply inverse transformation or not.
+
+        Returns:
+            y: Forward transformed input (or inverse transformed dependent on reverse parameter).
+            log_det_jac: log abs determinant of jacobian matrix of the transformation (or inv_log_det_jac dependent
+                on reverse parameter).
+        """
         if not reverse:
-            ldj = (-z-2*softplus(-z)).sum(dim=[1, 2, 3])
+            log_det_jac += (-z-2*softplus(-z)).sum(dim=[1, 2, 3])
             z = torch.sigmoid(z)
         else:
-            z = z * (1 - self.alpha) + 0.5 * self.alpha  # Scale to prevent boundaries 0 and 1
-            ldj = np.log(1 - self.alpha) * np.prod(z.shape[1:])
-            ldj += (-torch.log(z) - torch.log(1-z)).sum(dim=[1, 2, 3])
+            z = z * (1 - self.alpha) + 0.5 * self.alpha  # Scales to prevent boundaries 0 and 1.
+            log_det_jac += np.log(1 - self.alpha) * np.prod(z.shape[1:])
+            log_det_jac += (-torch.log(z) - torch.log(1-z)).sum(dim=[1, 2, 3])
             z = torch.log(z) - torch.log(1-z)
-        return z, ldj
+        return z, log_det_jac
 
-    def dequant(self, z):
-        # Transform discrete values to continuous volumes
+    def dequant(self, z: torch.tensor, log_det_jac: torch.tensor):
+        """Dequantization operation - transforms discrete values to continuous ones.
+
+        Args:
+            z: Input tensor.
+            log_det_jac: Ongoing log abs determinant of jacobian.
+
+        Returns:
+            y: Forward transformed input (or inverse transformed dependent on reverse parameter).
+            log_det_jac: log abs determinant of jacobian matrix of the transformation (or inv_log_det_jac dependent
+                on reverse parameter).
+        """
         z = z.to(torch.float32)
-        z = z + torch.rand_like(z).detach()
-        z = z / self.quants
-        ldj = -np.log(self.quants) * np.prod(z.shape[1:])
-        return z, ldj
+        z += torch.rand_like(z).detach()
+        z /= self.quants
+        log_det_jac += -np.log(self.quants) * np.prod(z.shape[1:])
+        return z, log_det_jac
 
 
 # class VariationalDequantization(Dequantization):
