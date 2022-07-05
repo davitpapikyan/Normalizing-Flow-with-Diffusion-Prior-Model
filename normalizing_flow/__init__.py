@@ -7,14 +7,14 @@ import torch
 from aim import Run
 from torchvision import transforms as vision_tranforms
 
-from data import read_dataset, discretize
+from data import read_dataset, discretize, calculate_fid
 from .glow import StepFlow, GlowBlock, Glow
 from .transforms import InvConv2d, InvConv2dLU, ActNorm, AffineCoupling, Squeeze, Prior, Split
 from .utils import init_optimizer, track_images, save_images
 from aim import Distribution
 
 
-# TODO (on hold): See which metrics are applied on both glow and diffusion paper. Add different metrics like FID.
+# TODO: (on hold) How to apply FID? how many samples to generate to compute it? what dataset to use (train|test)?
 # TODO: (on hold) Add variational dequatization.
 
 
@@ -94,10 +94,11 @@ def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, b
             discretize
     ])
 
-    train_loader, val_loader, test_loader = read_dataset(root=data_root, name=data_name, batch_size=batch_size,
-                                                         num_workers=num_workers, train_transform=train_transform,
-                                                         test_transform=test_transform,
-                                                         pin_memory=False, verbose=True)
+    train_loader, val_loader, test_loader, testset = read_dataset(root=data_root, name=data_name, batch_size=batch_size,
+                                                                  num_workers=num_workers,
+                                                                  train_transform=train_transform,
+                                                                  test_transform=test_transform, pin_memory=False,
+                                                                  verbose=True)
     logger.info("Training, validation and test dataloaders are successfully loaded.")
 
     optimizer = init_optimizer(optim_name, flow.parameters(), lr=lr)
@@ -191,10 +192,21 @@ def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, b
     # Testing with importance sampling technique.
     logger.info("Starting testing.")
     test_nll, test_bpd = evalueate(flow, test_loader, num_imp_samples, bpd_const, device)
+
+    # Calculating FID score.
+    logger.info("Calculating FID.")
+    fid_values = []
+    for _ in range(10):
+        generated_images, _ = flow.sample(n_samples=min(len(testset), 10000), img_shape=(img_size, img_size))
+        fid_values.append(calculate_fid(generated_images.to(torch.uint8), testset, device))
+    fid, std = np.mean(fid_values), np.std(fid_values)
+    logger.info(f"FID score mean: {fid}, std: {std}\n")
+
     logger.info(
-        f"Testing  imp_samples={num_imp_samples}  |  nll: {test_nll:.3f}  |  bpd: {test_bpd:.3f}")
+        f"Testing  imp_samples={num_imp_samples}  |  nll: {test_nll:.3f}  |  bpd: {test_bpd:.3f}  |  fid: {fid:.3f}")
     aim_logger.track(test_nll, name="nll", context={"subset": "test"})
     aim_logger.track(test_bpd, name="bpd", context={"subset": "test"})
+    aim_logger.track(fid, name="fid", context={"subset": "test"})
 
     aim_logger.close()
     logger.info("Experiment is completed.")

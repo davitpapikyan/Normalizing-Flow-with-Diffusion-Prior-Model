@@ -253,11 +253,9 @@ class AffineCoupling(Transform):
             log_det_jac: log abs determinant of jacobian matrix of the transformation.
         """
         x_a, x_b = x.chunk(2, dim=1)
-
         log_scale, bias = self.net(x_a).chunk(2, dim=1)
-        # scale = torch.sigmoid(log_scale+2)
 
-        s_fac = self.scaling_factor.exp().view(1, -1, 1, 1)
+        s_fac = rearrange(self.scaling_factor.exp(), 'c -> () c () ()')
         scale = torch.tanh(log_scale / s_fac) * s_fac
 
         y_a, y_b = x_a, (x_b+bias) * scale.exp()
@@ -279,7 +277,7 @@ class AffineCoupling(Transform):
         y_a, y_b = y.chunk(2, dim=1)
         log_scale, bias = self.net(y_a).chunk(2, dim=1)
 
-        s_fac = self.scaling_factor.exp().view(1, -1, 1, 1)
+        s_fac = rearrange(self.scaling_factor.exp(), 'c -> () c () ()')
         scale = torch.tanh(log_scale / s_fac) * s_fac
 
         inv_y_a, inv_y_b = y_a, y_b * torch.exp(-scale) - bias
