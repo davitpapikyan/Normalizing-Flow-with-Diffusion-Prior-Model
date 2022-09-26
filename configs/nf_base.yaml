@@ -1,7 +1,7 @@
 ##################################################
 ### Normalizing Flow experiment configurations ###
 ##################################################
-experiment_name: "glow_L=3_K=2"
+experiment_name: "glow_MNIST_0_L=2_K=16"
 phase: "train"
 
 resume:
@@ -10,23 +10,36 @@ resume:
   # resume_exp_dir has the form of ${experiment_name}_${now:%Y-%m-%d_%H-%M-%S}.
   resume_epoch: 0  # How many epochs the model has been trained.
 
+
 data:
-  name: "CelebA"  # One of ['CelebA', 'CIFAR10'].
+  name: "MNIST"  # One of ['MNIST', 'CelebA', 'CIFAR10'].
   root: "/Users/davit/Desktop/thesis/experiments/data"
-  batch_size: 16
+  batch_size: 128
   num_workers: 0
+  img_size: 32  # The image size to crop.
+  digits: [0]  # Only applicable to MNIST dataset, specifies the digits to be selected.
 #  transformations: ["transformation1", "transformation2"]
 
+
 model:
+  name: "nf_base"
+
   architecture:
-    L: 1
-    K: 1
+    L: 3  # The number of blocks (including the last blocks).
+    K: 8  # The number of StepFlows in each block.
+    temperature: 1.0  # Standard deviation of Normal prior distribution of NF.
+    apply_dequantization: False  # Whether to apply Dequantization as a fisrt layer of NF or not.
 
   training:
-    epochs: 10  # The number of epochs to train or continue training.
-    print_freq: 100
+    epochs: 20  # The number of epochs to train or continue training.
+    print_freq: 10
     val_freq: 1
-    save_checkpoint_freq: 1
+    save_checkpoint_freq: 5
+    n_bits: 5
+
+  logging:  # For Aim logger.
+    log_param_distribution: False  # Either to log model parameters' densities or not.
+    log_gen_images_per_iter: 2  # Per how many logging iterations to log generated images.
 
   testing:
     num_imp_samples: 10

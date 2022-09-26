@@ -5,18 +5,18 @@ Install the requirements:
 pip install -r requirements.txt
 ```
 
-To run the project:
+Run a single training:
 ```console
 python main.py hydra.job.chdir=True
 ```
 
-To open the dashboard with loss visualization and generated samples:
+Launch a dashboard to monitor current training or previous experiments:
 ```console
 cd ./outputs/nf_experiments/aim
 aim up
 ```
 
-
+<!--
 ## References:
 ```
 @misc{lippe2022uvadlc,
@@ -26,3 +26,4 @@ aim up
    howpublished = {\url{https://uvadlc-notebooks.readthedocs.io/en/latest/}}
 }
 ```
+-->
