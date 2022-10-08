@@ -1,19 +1,23 @@
 ##################################################
 ### Normalizing Flow experiment configurations ###
 ##################################################
-experiment_name: "glow_MNIST_0_L=2_K=16"
-phase: "train"
+experiment_name: "glow_MNIST_0_L=3_K=8"
+phase: "train"  # One of ['train', 'eval'].
+# In case of 'eval', make sure to provide resume_exp_dir resume_epoch in order to load model parameters.
 
 resume:
   # If resume_exp_dir is provided, then the training will be continued from resume_epoch epoch.
   resume_exp_dir: null  # The directory of experiment to resume the training.
   # resume_exp_dir has the form of ${experiment_name}_${now:%Y-%m-%d_%H-%M-%S}.
-  resume_epoch: 0  # How many epochs the model has been trained.
+  resume_epoch: 0  # How many epochs the model has been trained. It is also used to identify model parameters to load.
 
 
 data:
-  name: "MNIST"  # One of ['MNIST', 'CelebA', 'CIFAR10'].
+  name: "CIFAR10"  # One of ['MNIST', 'CIFAR10', 'CelebA']. Image sizes:
+  # MNIST: 28x28 (use 32), CIFAR10: 32x32 (use 32), CelebA: 178×218 (use 64).
   root: "/Users/davit/Desktop/thesis/experiments/data"
+  validate: False  # Whether to do validation step or do train/test. For final training (i.e. when best architecture and
+  # hyperparameters are known) set to False.
   batch_size: 128
   num_workers: 0
   img_size: 32  # The image size to crop.
@@ -22,8 +26,6 @@ data:
 
 
 model:
-  name: "nf_base"
-
   architecture:
     L: 3  # The number of blocks (including the last blocks).
     K: 8  # The number of StepFlows in each block.
@@ -35,7 +37,7 @@ model:
     print_freq: 10
     val_freq: 1
     save_checkpoint_freq: 5
-    n_bits: 5
+    n_bits: 1
 
   logging:  # For Aim logger.
     log_param_distribution: False  # Either to log model parameters' densities or not.

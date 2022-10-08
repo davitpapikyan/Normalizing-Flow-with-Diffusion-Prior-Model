@@ -7,6 +7,7 @@ from skimage import io
 from torch.utils.data import Dataset
 from torch_fidelity import calculate_metrics
 from torchvision.transforms import ToPILImage
+from torchvision.datasets import MNIST
 
 
 class CelebA(Dataset):
@@ -25,6 +26,25 @@ class CelebA(Dataset):
         img_name = os.path.join(self.data_dir, self.partition_file_sub.iloc[idx, 0])
         pil_img = self.convert_to_PIL(io.imread(img_name))
         return self.transform(pil_img) if self.transform else pil_img
+
+
+class FilteredMNIST(Dataset):
+    """Extends MNIST class to filter digits and convert to RGB."""
+
+    def __init__(self, data_dir, split, digits: list, transform=None):
+        if digits is None:
+            digits = list(range(10))
+        train = split == "train"
+        mnist_dataset = MNIST(root=data_dir, train=train, download=True)
+        self.data = [tup for tup in mnist_dataset if tup[1] in digits]
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx: int):
+        img, label = self.data[idx][0], self.data[idx][1]
+        return (self.transform(img), label) if self.transform else (img, label)
 
 
 class MapDataset(Dataset):
@@ -75,21 +95,33 @@ def calculate_fid(input1, input2, device) -> float:
         FID between input1 and input2.
     """
     cuda = device.type == 'gpu'
-    return calculate_metrics(input1=FIDDataset(input1), input2=FIDDataset(input2), batch_size=32, cuda=cuda, isc=False,
+    return calculate_metrics(input1=FIDDataset(input1), input2=FIDDataset(input2), batch_size=512, cuda=cuda, isc=False,
                              fid=True, kid=False, verbose=False)["frechet_inception_distance"]
 
 
-# TODO: Check if @torch.jit.script applied introduces speedup or not.
 def discretize(img):
     """The opposite transformation of torchvision.transforms.ToTensor().
+    Usually appled before Dequantization as torchvision transformation.
 
     Args:
         img: Input image.
 
     Returns:
-        Discretized tesnor image.
+        Discretized tensor image.
     """
-    return (img * 255).to(torch.uint8)  # int32
+    return (img * 255).to(torch.uint8)
+
+
+def identity_transform(img):
+    """The identity transformation.
+
+    Args:
+        img: Input image.
+
+    Returns:
+        Unchanged input.
+    """
+    return img
 
 
 def set_start_method_for_darwin():

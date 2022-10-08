@@ -1,14 +1,24 @@
 import torch
 import torch.nn as nn
 from einops import rearrange
-from torch.distributions import Normal
 from torch.nn.functional import conv2d
 
 from .base import Transform
 from .utils import coupling_network, abs_log_sum
 
 
-# TODO: allocate CUDA as soon as you create tensor torch.rand(size, device=torch.device('cuda'))
+class IdentityTransform(Transform):
+    """Identity transformation.
+    """
+
+    def __init__(self):
+        super(IdentityTransform, self).__init__()
+
+    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
+        return x, log_det_jac
+
+    def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
+        return y, inv_log_det_jac
 
 
 class ActNorm(Transform):
@@ -33,9 +43,11 @@ class ActNorm(Transform):
             in_channels: The number of channels of an input image.
         """
         super(ActNorm, self).__init__()
-        self.scale = nn.Parameter(torch.zeros(size=(in_channels, 1, 1)))
-        self.bias = nn.Parameter(torch.zeros(size=(in_channels, 1, 1)))
-        self.register_buffer("is_initialized", torch.tensor(0, dtype=torch.uint8))  # Controls the initialization.
+        self.scale = nn.Parameter(torch.zeros(size=(in_channels, 1, 1), device=self.device))
+        self.bias = nn.Parameter(torch.zeros(size=(in_channels, 1, 1), device=self.device))
+
+        # Controls the initialization.
+        self.register_buffer("is_initialized", torch.tensor(0, dtype=torch.uint8, device=self.device))
 
     def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
         """Computes forward transformation and log abs determinant of jacobian matrix.
@@ -256,7 +268,7 @@ class AffineCoupling(Transform):
         log_scale, bias = self.net(x_a).chunk(2, dim=1)
 
         s_fac = rearrange(self.scaling_factor.exp(), 'c -> () c () ()')
-        scale = torch.tanh(log_scale / s_fac) * s_fac
+        scale = torch.tanh(log_scale/s_fac) * s_fac
 
         y_a, y_b = x_a, (x_b+bias) * scale.exp()
         inv_y = torch.concat([y_a, y_b], dim=1)
@@ -295,7 +307,7 @@ class Squeeze(Transform):
         super(Squeeze, self).__init__()
 
     def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
-        """Transforms x tesnor of shape [B, C, H, W] into a tesnor of shape [B, 4C, H//2, W//2].
+        """Transforms x tensor of shape [B, C, H, W] into a tensor of shape [B, 4C, H//2, W//2].
         Not that the log abs determinant is 0.
 
         Args:
@@ -310,7 +322,7 @@ class Squeeze(Transform):
         return y, log_det_jac
 
     def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
-        """Transforms y tesnor of shape [B, C, H, W] into a tesnor of shape [B, C//4, H*2, W*2].
+        """Transforms y tensor of shape [B, C, H, W] into a tensor of shape [B, C//4, H*2, W*2].
         Not that the log abs determinant is 0.
 
         Args:
@@ -325,48 +337,20 @@ class Squeeze(Transform):
         return inv_y, inv_log_det_jac
 
 
-class Prior:
-    """Prior distribution of Glow model.
-    """
-
-    def __init__(self):
-        """Initializes the prior with standard normal distribution."""
-        self.__prior = Normal(loc=0.0, scale=1.0)
-
-    def sample(self, shape: torch.Size) -> torch.tensor:
-        """Samples from prior distribution.
-
-        Args:
-            shape: The size of tensor to be sampled.
-
-        Returns:
-            Sampled tensor of given shape.
-        """
-        return self.__prior.sample(sample_shape=shape)
-
-    def compute_log_prob(self, x: torch.tensor):
-        """Computes the log density of the given tensor.
-
-        Args:
-             x: Input tensor.
-
-        Returns:
-            Log density value.
-        """
-        return self.__prior.log_prob(x).view(x.size(0), -1).sum(dim=1)
-
-
 class Split(Transform):
     """Implements split operation on images."""
 
-    def __init__(self):
+    def __init__(self, prior):
         """Initializes prior distribution.
+
+        Args:
+            prior: Initialized prior distribution.
         """
         super(Split, self).__init__()
-        self.__prior = Prior()
+        self.__prior = prior
 
     def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
-        """Transforms x tesnor of shape [B, C, H, W] into a tesnor of shape [B, C//2, H, W]
+        """Transforms x tensor of shape [B, C, H, W] into a tensor of shape [B, C//2, H, W]
         by splitting it channel-wise. Log determinant is computed for the second part of split.
 
         Args:
@@ -382,7 +366,7 @@ class Split(Transform):
         return y, log_det_jac
 
     def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
-        """Transforms y tesnor of shape [B, C, H, W] into a tesnor of shape [B, 2*C, H, W]
+        """Transforms y tensor of shape [B, C, H, W] into a tensor of shape [B, 2*C, H, W]
         by sampling from the prior distribution.
 
         Args:

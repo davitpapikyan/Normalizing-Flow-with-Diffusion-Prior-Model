@@ -6,7 +6,8 @@ import torch.nn as nn
 from torch.nn.functional import softplus
 
 from .base import Transform
-from .transforms import ActNorm, InvConv2d, AffineCoupling, Squeeze, Split, Prior
+from .transforms import IdentityTransform, ActNorm, InvConv2d, AffineCoupling, Squeeze, Split
+from .prior import GaussianPrior
 from .utils import calc_chunk_sizes
 
 
@@ -74,10 +75,11 @@ class GlowBlock(Transform):
         split: Split operation.
     """
 
-    def __init__(self, in_channels: int = 3, K: int = 32):
+    def __init__(self, prior, in_channels: int = 3, K: int = 32):
         """Initializes operations of the block.
 
         Args:
+            prior: Initialized prior distribution.
             in_channels: The number of input channels to the block.
             K: The number of flows in the block.
         """
@@ -85,7 +87,7 @@ class GlowBlock(Transform):
         flow_channels = 4 * in_channels
         self.squeeze = Squeeze()
         self.flows = nn.ModuleList([StepFlow(in_channels=flow_channels) for _ in range(K)])
-        self.split = Split()
+        self.split = Split(prior=prior)
 
     def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
         """Computes forward transformation and log abs determinant of jacobian matrix.
@@ -143,27 +145,36 @@ class Glow(Transform):
         final_flows: A list of step-flows applied in the end of the architecture.
     """
 
-    def __init__(self, in_channel: int = 3, L: int = 3, K: int = 32):
+    def __init__(self,
+                 in_channel: int = 3,
+                 L: int = 3,
+                 K: int = 32,
+                 Prior=GaussianPrior,
+                 temperature: float = 1.0,
+                 apply_dequantization: bool = False):
         """Initializes operations of the model.
 
         Args:
             in_channel: The number of input channels.
             L: The number of Glow blocks.
             K: The number of flows in the Glow block.
+            Prior: The prior distribution.
+            temperature: Standard deviation of prior distribution often referred to as temperature of sampling.
+            apply_dequantization: Boolean value indicating whether to apply Dequantization on data or not.
         """
         super(Glow, self).__init__()
         self.L = L
         self.K = K
         self.in_channel = in_channel
 
-        # self.dequant = Dequantization()
-        self.dequant = Dequantization()  # VariationalDequantization()
-        self.blocks = nn.ModuleList(GlowBlock(in_channels=(2**i * self.in_channel), K=self.K)
+        self.__prior = Prior(scale=temperature)
+        self.dequant = Dequantization() if apply_dequantization else IdentityTransform()   # VariationalDequantization()
+        self.blocks = nn.ModuleList(GlowBlock(prior=self.__prior, in_channels=(2**i * self.in_channel),
+                                              K=self.K)
                                     for i in range(self.L-1))
         self.final_squeeze = Squeeze()
         self.final_flows = nn.ModuleList(StepFlow(in_channels=(2**(self.L+1) * self.in_channel))
                                          for _ in range(self.K))
-        self.__prior = Prior()
 
     def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
         """Computes forward transformation and log abs determinant of jacobian matrix.
@@ -177,7 +188,7 @@ class Glow(Transform):
             log_det_jac: log abs determinant of jacobian matrix of the transformation.
         """
         # Dequantization.
-        y, log_det_jac_dequant = self.dequant.transform(x, log_det_jac)
+        y, log_det_jac = self.dequant.transform(x, log_det_jac)
 
         # Glow block.
         for block in self.blocks:
@@ -240,12 +251,13 @@ class Glow(Transform):
         return n_channels, height, width
 
     @torch.no_grad()
-    def sample(self, n_samples: int, img_shape: Tuple[int, int]):
+    def sample(self, n_samples: int, img_shape: Tuple[int, int], postprocess_func=None):
         """Samples from Glow model.
 
         Args:
             n_samples: The number of samples to generate.
             img_shape: The image shape - a tuple containing height and width of input.
+            postprocess_func: Postprocessor function to generate final output.
 
         Returns:
             A tuple of 2 values, the first is a torch.tensor representing sampled data points, the second
@@ -258,10 +270,10 @@ class Glow(Transform):
         log_likelihood = torch.zeros(n_samples, device=self.device)
         new_samples, log_likelihood = self.invert(z, log_likelihood)
         self.train()
-        return new_samples.float(), log_likelihood
+        final_output = postprocess_func(new_samples.float()) if postprocess_func else new_samples.float()
+        return final_output, log_likelihood
 
 
-# TODO: Check if @torch.jit.script applied on transform, invert, sigmoid and dequant introduce speedup or not.
 class Dequantization(Transform):
     """Image dequantization layer. Take a look at UvA DL Notebooks tutorial - Tutorial 11: Normalizing Flows for
     image modeling where the below implementation is taken from.
@@ -305,7 +317,7 @@ class Dequantization(Transform):
             inv_y: Inverse transformed input.
             inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
         """
-        inv_y, inv_log_det_jac = self.sigmoid(y, inv_log_det_jac, reverse=False)
+        inv_y, inv_log_det_jac = self.sigmoid(y, inv_log_det_jac)
         inv_y *= self.quants
         inv_log_det_jac += np.log(self.quants) * np.prod(inv_y.shape[1:])
         inv_y = torch.floor(inv_y).clamp(min=0, max=self.quants - 1).to(torch.int32)
