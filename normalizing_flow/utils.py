@@ -8,7 +8,7 @@ import torch.nn as nn
 import torchvision.utils as vutils
 from PIL import Image
 from torchvision import transforms as vision_tranforms
-from data import identity_transform
+from data import discretize
 
 
 def abs_log_sum(x: torch.tensor) -> torch.tensor:
@@ -106,41 +106,59 @@ def init_optimizer(name: str, params, lr: float) -> torch.optim.Optimizer:
     return Optimizer(params, lr=lr)
 
 
-def get_data_transforms(data_name, img_size):
+def get_data_transforms(data_name, img_size, apply_dequantization=False):
     """Creates train and test data transformations.
 
     Args:
         data_name: The dataset name.
         img_size: The image size for resizing.
+        apply_dequantization: If dequatization is applied, then no preprocessing is needed.
 
     Returns:
         Train and test transformations.
     """
-    train_transform = vision_tranforms.Compose([
-            vision_tranforms.Pad((img_size-28)//2) if data_name == "MNIST" and img_size > 28 else
-            vision_tranforms.Resize((img_size, img_size)),
-            vision_tranforms.RandomHorizontalFlip() if data_name in ("CelebA", "CIFAR10") else identity_transform,
-            vision_tranforms.ToTensor()
-    ])
-    test_transform = vision_tranforms.Compose([
-            vision_tranforms.Resize((img_size, img_size)),
-            vision_tranforms.ToTensor()
-    ])
+    train_transform, test_transform = [], []
+
+    # Train data transformations.
+    if data_name == "MNIST" and img_size > 28:
+        train_transform.append(vision_tranforms.Pad((img_size-28)//2))
+    else:
+        train_transform.append(vision_tranforms.Resize((img_size, img_size)))
+
+    if data_name in ("CelebA", "CIFAR10"):
+        train_transform.append(vision_tranforms.RandomHorizontalFlip())
+
+    train_transform.append(vision_tranforms.ToTensor())
+
+    # Test data transformations.
+    test_transform.append(vision_tranforms.Resize((img_size, img_size)))
+    test_transform.append(vision_tranforms.ToTensor())
+
+    if apply_dequantization:
+        train_transform.append(discretize)
+        test_transform.append(discretize)
+
+    train_transform = vision_tranforms.Compose(train_transform)
+    test_transform = vision_tranforms.Compose(test_transform)
     return train_transform, test_transform
 
 
 @torch.no_grad()
-def preprocess_batch(batch, n_bits, n_bins):
+def preprocess_batch(batch, n_bits, n_bins, apply_dequantization=False):
     """Preprocesses a batch of images before feeding into NF.
 
     Args:
         batch: A batch of images of shape [B, C, H, W].
         n_bits: The number of bits to encode.
         n_bins: The number of bins.
+        apply_dequantization: If dequatization is applied, then no preprocessing is needed.
 
     Returns:
         Preprocessed batch.
     """
+    if apply_dequantization:
+        return batch
+
     # Make sure that data transformations include ToTensor (i.e. [0, 1] mapping) as final transformation.
     # In general, a batch of images passed as input to this function must be within the range [0, 1].
     processed_batch = batch * 255
@@ -154,17 +172,20 @@ def preprocess_batch(batch, n_bits, n_bins):
 
 
 @torch.no_grad()
-def postprocess_batch(batch, n_bins):
+def postprocess_batch(batch, n_bins, apply_dequantization=False):
     """Postprocesses a batch of images before feeding into NF.
 
     Args:
         batch: A batch of images of shape [B, C, H, W].
         n_bins: The number of bins.
+        apply_dequantization: If dequatization is applied, then no preprocessing is needed.
 
     Returns:
         Postprocessed batch.
     """
-    return torch.clip(torch.floor((batch+0.5)*n_bins) * (256.0/n_bins), 0, 255).to("cpu", torch.uint8)
+
+    return torch.clip(torch.floor((batch+0.5)*n_bins) * (256.0/n_bins), 0, 255).to("cpu", torch.uint8) if not \
+        apply_dequantization else batch
 
 
 @torch.no_grad()

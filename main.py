@@ -1,4 +1,5 @@
 import os
+from datetime import datetime
 
 import hydra
 import torch
@@ -68,7 +69,8 @@ def run_nf_base_experiment(configs: DictConfig):
         # Training the model.
         train(flow, logger=logger, experiment_name=configs.experiment_name, exp_output_dir=exp_output_dir,
               data_root=configs.data.root, data_name=configs.data.name, validate=configs.data.validate,
-              batch_size=configs.data.batch_size, num_workers=configs.data.num_workers,
+              batch_size=configs.data.batch_size, apply_dequantization=configs.model.architecture.apply_dequantization,
+              num_workers=configs.data.num_workers,
               optim_name=configs.model.optimizer.type, lr=configs.model.optimizer.lr,
               n_epochs=configs.model.training.epochs, val_freq=configs.model.training.val_freq,
               print_freq=configs.model.training.print_freq,
@@ -93,13 +95,16 @@ def run_nf_base_experiment(configs: DictConfig):
         checkpoint = torch.load(os.path.join(checkpoint_dir, f"model_{str(resume_info['epoch']).zfill(3)}.pt"))
         flow.load_state_dict(checkpoint["flow"])
 
-        train_transform, test_transform = get_data_transforms(configs.data.name, configs.data.img_size)
+        train_transform, test_transform = get_data_transforms(configs.data.name, configs.data.img_size,
+                                                              configs.model.architecture.apply_dequantization)
         _, _, test_loader, _ = read_dataset(root=configs.data.root, name=configs.data.name,
                                             validate=configs.data.validate, batch_size=configs.data.batch_size,
                                             num_workers=configs.data.num_workers, train_transform=train_transform,
                                             test_transform=test_transform, digits=configs.data.digits, pin_memory=False,
                                             verbose=True)
-        metrics = evaluate(flow, test_loader, flow.device, configs.model.testing.num_imp_samples, configs.data.img_size,
+        logger.info("Evaluating on test set")
+        metrics = evaluate(flow, configs.model.architecture.apply_dequantization, test_loader, flow.device,
+                           configs.model.testing.num_imp_samples, configs.data.img_size,
                            configs.model.training.n_bits, scores=("BPD", "FID"))
         logger.info(f"Evaluation results  |  bpd: {metrics['BPD']:.3f}  |  fid:  {metrics['FID']:.3f}")
         logger.info("Evaluation is completed.")
@@ -115,4 +120,9 @@ if __name__ == "__main__":
     # print(args.config_file)
 
     set_seeds(SEED)  # For reproducability.
-    run_nf_base_experiment()  # Trains a Glow model based on configuration parameters from configs/nf_base.yaml.
+
+    experiment_start = datetime.now()
+    run_nf_base_experiment()  # Trains/evals a Glow model based on configuration parameters from configs/nf_base.yaml.
+    logger.info("="*70)
+    experiment_duration = datetime.now() - experiment_start
+    logger.info(f"Experiment duration: {experiment_duration}")

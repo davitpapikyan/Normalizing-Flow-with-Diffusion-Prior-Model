@@ -112,18 +112,6 @@ def discretize(img):
     return (img * 255).to(torch.uint8)
 
 
-def identity_transform(img):
-    """The identity transformation.
-
-    Args:
-        img: Input image.
-
-    Returns:
-        Unchanged input.
-    """
-    return img
-
-
 def set_start_method_for_darwin():
     if platform == "darwin":
         import multiprocessing

@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from aim import Run
 
-from data import read_dataset, discretize, identity_transform, calculate_fid
+from data import read_dataset, calculate_fid
 from .glow import StepFlow, GlowBlock, Glow
 from .transforms import InvConv2d, InvConv2dLU, ActNorm, AffineCoupling, Squeeze, Split
 from .prior import GaussianPrior
@@ -17,13 +17,13 @@ from aim import Distribution, Text
 # TODO: (on hold) Add variational dequatization.
 
 @torch.no_grad()
-def evaluate(flow, data_loader, device, num_imp_samples, img_size: int = 32, n_bits: int = 5,
-             scores: tuple = ("BPD", "FID")):
-    # TODO: should be clarified
+def evaluate(flow, apply_dequantization: bool, data_loader, device, num_imp_samples, img_size: int = 32,
+             n_bits: int = 5, scores: tuple = ("BPD", "FID")):
     """Evaluates the metrics provided in scores parameter.
 
     Args:
         flow: Normalizing flow model.
+        apply_dequantization: Whether to assume dequantized input or not.
         data_loader: The data loader.
         device: Device.
         num_imp_samples: The number of samples to genreate.
@@ -38,8 +38,8 @@ def evaluate(flow, data_loader, device, num_imp_samples, img_size: int = 32, n_b
 
     if "BPD" in scores:
         n_pixel = img_size * img_size * 3.0
-        bpd = calculate_bpd(flow, data_loader, n_bits, 2.0 ** n_bits, n_pixel, np.log2(np.e) / n_pixel, num_imp_samples,
-                            device)
+        bpd = calculate_bpd(flow, apply_dequantization, data_loader, n_bits, 2.0 ** n_bits, n_pixel,
+                            np.log2(np.e) / n_pixel, num_imp_samples, device)
         metrics["BPD"] = bpd
 
     if "FID" in scores:
@@ -56,11 +56,13 @@ def evaluate(flow, data_loader, device, num_imp_samples, img_size: int = 32, n_b
 
 
 @torch.no_grad()
-def calculate_bpd(flow, data_loader, n_bits, n_bins, n_pixel, bpd_const, num_imp_samples, device):
+def calculate_bpd(flow, apply_dequantization: bool, data_loader, n_bits, n_bins, n_pixel, bpd_const, num_imp_samples,
+                  device):
     """Calculating BPD of normalizing flow with importance sampling.
 
     Args:
         flow: Normalizing flow model.
+        apply_dequantization: Whether to assume dequantized input or not.
         data_loader: The data loader.
         n_bits: The number of bits to encode.
         n_bins: The number of bins.
@@ -77,12 +79,12 @@ def calculate_bpd(flow, data_loader, n_bits, n_bins, n_pixel, bpd_const, num_imp
 
     for _, data in enumerate(data_loader):
         batch = data[0].to(device) if isinstance(data, list) else data.to(device)
-        batch = preprocess_batch(batch, n_bits, n_bins)
+        batch = preprocess_batch(batch, n_bits, n_bins, apply_dequantization)
 
         sample_log_likelihoods = []
         for _ in range(num_imp_samples):  # Importance sampling.
             ll = torch.zeros(batch.size(0), device=device)
-            _, ll = flow.transform(batch + torch.rand_like(batch) / n_bins, ll)
+            _, ll = flow.transform(batch if apply_dequantization else batch + torch.rand_like(batch) / n_bins, ll)
             sample_log_likelihoods.append(ll)
 
         log_likelihoods = torch.stack(sample_log_likelihoods)
@@ -95,9 +97,9 @@ def calculate_bpd(flow, data_loader, n_bits, n_bins, n_pixel, bpd_const, num_imp
 
 
 def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, validate, batch_size,
-          num_workers, optim_name, lr, n_epochs, val_freq, print_freq, save_checkpoint_freq, log_param_distribution,
-          log_gen_images_per_iter, device, checkpoint_dir, num_imp_samples, result_dir, resume_info: dict,
-          img_size: int = 32, n_bits: int = 5, digits: list = None):
+          apply_dequantization, num_workers, optim_name, lr, n_epochs, val_freq, print_freq, save_checkpoint_freq,
+          log_param_distribution, log_gen_images_per_iter, device, checkpoint_dir, num_imp_samples, result_dir,
+          resume_info: dict, img_size: int = 32, n_bits: int = 5, digits: list = None):
     """Trains the normalizing flow model, runs validation and test steps.
 
     Args:
@@ -109,6 +111,7 @@ def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, v
         data_name: Which data to load.
         validate: Whether to create validation set or not.
         batch_size: How many samples per batch to load.
+        apply_dequantization: Whether to assume dequantized input or not.
         num_workers: How many subprocesses to use for data loading.
         optim_name: The optimizer name.
         lr: The learning rate.
@@ -138,7 +141,7 @@ def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, v
         }, os.path.join(checkpoint_directory, f"model_{str(current_epoch).zfill(3)}.pt"))
 
     # Preparing data.
-    train_transform, test_transform = get_data_transforms(data_name, img_size)
+    train_transform, test_transform = get_data_transforms(data_name, img_size, apply_dequantization)
     train_loader, val_loader, test_loader, testset = read_dataset(root=data_root, name=data_name, validate=validate,
                                                                   batch_size=batch_size, num_workers=num_workers,
                                                                   train_transform=train_transform,
@@ -183,14 +186,16 @@ def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, v
         start_epoch_time = datetime.now()
         for iteration, data in enumerate(train_loader):
             batch = data[0].to(device) if isinstance(data, list) else data.to(device)
-            batch = preprocess_batch(batch, n_bits, n_bins)
+            batch = preprocess_batch(batch, n_bits, n_bins, apply_dequantization)
 
             # Setting gradients to None which reduces the number of memory operations compared to model.zero_grad().
             for param in flow.parameters():
                 param.grad = None
 
             log_likelihood = torch.zeros(batch.size(0), device=device)
-            _, log_likelihood = flow.transform(batch + torch.rand_like(batch) / n_bins, log_likelihood)
+            _, log_likelihood = flow.transform(batch if apply_dequantization else
+                                               batch + torch.rand_like(batch) / n_bins, log_likelihood)
+
             # See the discussion on why noise is being added in [Section 3.1,
             # A note on the evaluation of generative models] paper.
 
@@ -239,16 +244,18 @@ def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, v
         # [Validation]
         if validate and epoch % val_freq == 0:
             logger.info("Starting validation.")
-            val_bpd = calculate_bpd(flow, val_loader, n_bits, n_bins, n_pixel, bpd_const, 1, device)
+            val_bpd = calculate_bpd(flow, apply_dequantization, val_loader, n_bits, n_bins, n_pixel, bpd_const, 1,
+                                    device)
             logger.info(f"Epoch: {epoch:5}  |  Validation  |  bpd: {val_bpd:.3f}")
             aim_logger.track(val_bpd, name="bpd", epoch=epoch, context={"subset": "val"})
 
         running_loss = 0.0
 
         # Logging datetime information duration.
+        logger.info("-"*70)
         end_epoch_time = datetime.now()
         duration = end_epoch_time - start_epoch_time
-        logger.info(f"Duration of the last epoch: {duration}")
+        logger.info(f"Duration of epoch: {duration}")
         estimated_finish = datetime.now() + duration * (n_epochs-epoch)
         logger.info(f"Estimated end of training: {estimated_finish}")
         logger.info(f"Time remaining: {estimated_finish-datetime.now()}\n")
@@ -280,12 +287,15 @@ def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, v
     # logger.info(f"FID score mean: {fid}, std: {std}\n")
 
 
-    metrics = evaluate(flow, test_loader, flow.device, num_imp_samples, img_size, n_bits, scores=("BPD", "FID"))
-    train_bpd = calculate_bpd(flow, train_loader, n_bits, n_bins, n_pixel, bpd_const, num_imp_samples, device)
+    metrics = evaluate(flow, apply_dequantization, test_loader, flow.device, num_imp_samples, img_size, n_bits,
+                       scores=("BPD", "FID"))
+    train_bpd = calculate_bpd(flow, apply_dequantization, train_loader, n_bits, n_bins, n_pixel, bpd_const,
+                              num_imp_samples, device)
     aim_logger.track(metrics["BPD"], name="bpd", context={"subset": "test"})
     aim_logger.track(metrics["FID"], name="fid", context={"subset": "test"})
     log_text += f"  |  train_bpd: {train_bpd:.3f}  |  test_bpd: {metrics['BPD']:.3f}  |  fid: {metrics['FID']:.3f}"
     aim_logger.track(Text(log_text), name="NF final stats")
+    logger.info(log_text)
 
     # logger.info(log_text + f"  |  fid: {fid:.3f}")
     # aim_logger.track(fid, name="fid", context={"subset": "test"})
@@ -296,9 +306,3 @@ def train(flow, logger, experiment_name, exp_output_dir, data_root, data_name, v
 
 __all__ = [InvConv2d, InvConv2dLU, ActNorm, AffineCoupling, StepFlow, Squeeze, GaussianPrior, Split, GlowBlock, Glow,
            get_data_transforms, train, evaluate]
-
-
-# TODO:
-#  1) Test resume_info
-#  2) test phase="eval"
-#  3) test dequantization
