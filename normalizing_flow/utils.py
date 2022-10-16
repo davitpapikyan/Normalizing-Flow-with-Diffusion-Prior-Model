@@ -86,6 +86,31 @@ def calc_chunk_sizes(n_dim: int) -> Tuple[int, int]:
         return (n_dim+1) // 2, n_dim // 2
 
 
+def calculate_output_shapes(L, in_channel, size):
+    """Calculates output shapes of Glow. Model input must be of dimension (in_channel, size, size).
+
+    Args:
+        L:
+        in_channel: The number of channels of input.
+        size: The input dimensions.
+
+    Returns:
+        A list of tuples where each tuple is a tripple of values (channel, dim 1, dim 2).
+    """
+    z_shapes = []  # Stores shapes after each block and final output shape.
+
+    for _ in range(L-1):
+        if size % 2 != 0:
+            raise ValueError("The input dimension is not divisible by 2!")
+
+        in_channel *= 2
+        size //= 2
+        z_shapes.append((in_channel, size, size))
+
+    z_shapes.append((in_channel * 4, size // 2, size // 2))
+    return z_shapes
+
+
 def init_optimizer(name: str, params, lr: float) -> torch.optim.Optimizer:
     """Initializes optimizer.
 
@@ -128,10 +153,11 @@ def get_data_transforms(data_name, img_size, apply_dequantization=False):
     if data_name in ("CelebA", "CIFAR10"):
         train_transform.append(vision_tranforms.RandomHorizontalFlip())
 
-    train_transform.append(vision_tranforms.ToTensor())
-
     # Test data transformations.
     test_transform.append(vision_tranforms.Resize((img_size, img_size)))
+
+    # Final transformations.
+    train_transform.append(vision_tranforms.ToTensor())
     test_transform.append(vision_tranforms.ToTensor())
 
     if apply_dequantization:
@@ -224,7 +250,7 @@ def save_images(images: torch.tensor, path: str, name: str) -> None:
     )
 
 
-def calculate_loss(log_likelihood: torch.tensor, n_bins: float, n_pixel: float):
+def calculate_loss(log_likelihood: torch.Tensor, n_bins: float, n_pixel: float):
     """Calculates bits per dimension (BPD) loss.
 
     Args:

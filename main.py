@@ -8,6 +8,7 @@ from omegaconf import DictConfig, OmegaConf
 from normalizing_flow import Glow, train, evaluate, get_data_transforms
 from utils import setup_logger, set_seeds
 from data import read_dataset
+from normalizing_flow import GaussianPrior
 
 
 # import argparse
@@ -42,6 +43,9 @@ def run_nf_base_experiment(configs: DictConfig):
                 apply_dequantization=configs.model.architecture.apply_dequantization)
     flow.to(flow.device)
 
+    # The prior distribution.
+    gaussian_prior = GaussianPrior(scale=configs.model.architecture.temperature)
+
     if configs.phase == "train":
 
         if not configs.resume.resume_exp_dir:  # If the training startes from scratch.
@@ -67,13 +71,13 @@ def run_nf_base_experiment(configs: DictConfig):
         exp_output_dir = workdir.split("/")[-1] if not resume_info else resume_info["dir"]
 
         # Training the model.
-        train(flow, logger=logger, experiment_name=configs.experiment_name, exp_output_dir=exp_output_dir,
-              data_root=configs.data.root, data_name=configs.data.name, validate=configs.data.validate,
-              batch_size=configs.data.batch_size, apply_dequantization=configs.model.architecture.apply_dequantization,
-              num_workers=configs.data.num_workers,
-              optim_name=configs.model.optimizer.type, lr=configs.model.optimizer.lr,
-              n_epochs=configs.model.training.epochs, val_freq=configs.model.training.val_freq,
-              print_freq=configs.model.training.print_freq,
+        train(flow, gaussian_prior, logger=logger, experiment_name=configs.experiment_name,
+              exp_output_dir=exp_output_dir, data_root=configs.data.root, data_name=configs.data.name,
+              validate=configs.data.validate, batch_size=configs.data.batch_size,
+              apply_dequantization=configs.model.architecture.apply_dequantization,
+              num_workers=configs.data.num_workers, optim_name=configs.model.optimizer.type,
+              lr=configs.model.optimizer.lr, n_epochs=configs.model.training.epochs,
+              val_freq=configs.model.training.val_freq, print_freq=configs.model.training.print_freq,
               log_param_distribution=configs.model.logging.log_param_distribution,
               log_gen_images_per_iter=configs.model.logging.log_gen_images_per_iter,
               save_checkpoint_freq=configs.model.training.save_checkpoint_freq, device=flow.device,
@@ -103,8 +107,8 @@ def run_nf_base_experiment(configs: DictConfig):
                                             test_transform=test_transform, digits=configs.data.digits, pin_memory=False,
                                             verbose=True)
         logger.info("Evaluating on test set")
-        metrics = evaluate(flow, configs.model.architecture.apply_dequantization, test_loader, flow.device,
-                           configs.model.testing.num_imp_samples, configs.data.img_size,
+        metrics = evaluate(flow, gaussian_prior, configs.model.architecture.apply_dequantization, test_loader,
+                           flow.device, configs.model.testing.num_imp_samples, configs.data.img_size,
                            configs.model.training.n_bits, scores=("BPD", "FID"))
         logger.info(f"Evaluation results  |  bpd: {metrics['BPD']:.3f}  |  fid:  {metrics['FID']:.3f}")
         logger.info("Evaluation is completed.")

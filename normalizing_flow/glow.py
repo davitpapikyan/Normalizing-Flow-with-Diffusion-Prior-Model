@@ -85,16 +85,18 @@ class GlowBlock(Transform):
         """
         super(GlowBlock, self).__init__()
         flow_channels = 4 * in_channels
+
         self.squeeze = Squeeze()
         self.flows = nn.ModuleList([StepFlow(in_channels=flow_channels) for _ in range(K)])
         self.split = Split(prior=prior)
 
-    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
+    def transform(self, x: torch.tensor, log_det_jac: torch.tensor, return_latent: bool = False):
         """Computes forward transformation and log abs determinant of jacobian matrix.
 
         Args:
             x: Input tensor of shape [B, C, H, W].
             log_det_jac: Ongoing log abs determinant of jacobian matrix.
+            return_latent: Either to return latent variable or not.
 
         Returns:
             y: Forward transformed input.
@@ -108,9 +110,9 @@ class GlowBlock(Transform):
             y, log_det_jac = flow.transform(y, log_det_jac)
 
         # Split.
-        y, log_det_jac = self.split.transform(y, log_det_jac)
+        y, log_det_jac, z = self.split.transform(y, log_det_jac, return_latent)
 
-        return y, log_det_jac
+        return y, log_det_jac, z
 
     def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
         """Computes inverse transformation and log abs determinant of jacobian matrix.
@@ -158,7 +160,7 @@ class Glow(Transform):
             in_channel: The number of input channels.
             L: The number of Glow blocks.
             K: The number of flows in the Glow block.
-            Prior: The prior distribution.
+            Prior: The prior distribution. By default Gaussian prior is used.
             temperature: Standard deviation of prior distribution often referred to as temperature of sampling.
             apply_dequantization: Boolean value indicating whether to apply Dequantization on data or not.
         """
@@ -167,7 +169,7 @@ class Glow(Transform):
         self.K = K
         self.in_channel = in_channel
 
-        self.__prior = Prior(scale=temperature)
+        self.__prior = Prior(scale=temperature)  # TODO: Delete Prior
         self.dequant = Dequantization() if apply_dequantization else IdentityTransform()   # VariationalDequantization()
         self.blocks = nn.ModuleList(GlowBlock(prior=self.__prior, in_channels=(2**i * self.in_channel),
                                               K=self.K)
@@ -176,23 +178,28 @@ class Glow(Transform):
         self.final_flows = nn.ModuleList(StepFlow(in_channels=(2**(self.L+1) * self.in_channel))
                                          for _ in range(self.K))
 
-    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
+    def transform(self, x: torch.Tensor, log_det_jac: torch.tensor, return_latent: bool = False):
         """Computes forward transformation and log abs determinant of jacobian matrix.
 
         Args:
             x: Input tensor of shape [B, C, H, W].
             log_det_jac: Ongoing log abs determinant of jacobian matrix.
+            return_latent: Either to return latent variable or not.
 
         Returns:
             y: Forward transformed input.
             log_det_jac: log abs determinant of jacobian matrix of the transformation.
         """
+        latent_variables = [] if return_latent else None  # Storage for latent variables.
+
         # Dequantization.
         y, log_det_jac = self.dequant.transform(x, log_det_jac)
 
         # Glow block.
-        for block in self.blocks:
-            y, log_det_jac = block.transform(y, log_det_jac)
+        for i, block in enumerate(self.blocks):
+            y, log_det_jac, z = block.transform(y, log_det_jac, return_latent)
+            if return_latent:
+                latent_variables.append(z)
 
         # Squeeze.
         y, log_det_jac = self.final_squeeze.transform(y, log_det_jac)
@@ -201,9 +208,13 @@ class Glow(Transform):
         for flow in self.final_flows:
             y, log_det_jac = flow.transform(y, log_det_jac)
 
-        log_det_jac += self.__prior.compute_log_prob(y)
+        # log_det_jac += self.__prior.compute_log_prob(y)
+        if return_latent:
+            latent_variables.append(y)
+        else:
+            latent_variables = [y]  # Returns only the last latent.
 
-        return y, log_det_jac
+        return latent_variables, log_det_jac  # TODO: change docstring
 
     def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
         """Computes inverse transformation and

@@ -13,12 +13,12 @@ resume:
 
 
 data:
-  name: "MNIST"  # One of ['MNIST', 'CIFAR10', 'CelebA']. Image sizes:
+  name: "CIFAR10"  # One of ['MNIST', 'CIFAR10', 'CelebA']. Image sizes:
   # MNIST: 28x28 (use 32), CIFAR10: 32x32 (use 32), CelebA: 178×218 (use 64).
   root: "/Users/davit/Desktop/thesis/experiments/data"
   validate: False  # Whether to do validation step or do train/test. For final training (i.e. when best architecture and
   # hyperparameters are known) set to False.
-  batch_size: 128
+  batch_size: 2
   num_workers: 0
   img_size: 32  # The image size to crop.
   digits: [0]  # Only applicable to MNIST dataset, specifies the digits to be selected.
@@ -28,13 +28,13 @@ data:
 model:
   architecture:
     L: 3  # The number of blocks (including the last blocks).
-    K: 8  # The number of StepFlows in each block.
-    temperature: 1.0  # Standard deviation of Normal prior distribution of NF.
+    K: 32  # The number of StepFlows in each block.
+    temperature: 0.7  # Standard deviation of Normal prior distribution of NF.
     apply_dequantization: False  # Whether to apply Dequantization as a fisrt layer of NF or not.
 
   training:
     epochs: 20  # The number of epochs to train or continue training.
-    print_freq: 10
+    print_freq: 25
     val_freq: 1
     save_checkpoint_freq: 5
     n_bits: 5

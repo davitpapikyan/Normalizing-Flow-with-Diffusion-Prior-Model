@@ -347,23 +347,24 @@ class Split(Transform):
             prior: Initialized prior distribution.
         """
         super(Split, self).__init__()
-        self.__prior = prior
+        self.__prior = prior  # TODO: Delete prior
 
-    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
+    def transform(self, x: torch.tensor, log_det_jac: torch.tensor, return_latent: bool = False):
         """Transforms x tensor of shape [B, C, H, W] into a tensor of shape [B, C//2, H, W]
         by splitting it channel-wise. Log determinant is computed for the second part of split.
 
         Args:
             x: Input tensor of shape [B, C, H, W].
             log_det_jac: Ongoing log abs determinant of jacobian.
+            return_latent: Either to return latent variable or not.
 
         Returns:
             y: Forward transformed input.
             log_det_jac: log abs determinant of jacobian matrix of the transformation.
         """
         y, y_split = x.chunk(2, dim=1)
-        log_det_jac += self.__prior.compute_log_prob(y_split)
-        return y, log_det_jac
+        # log_det_jac += self.__prior.compute_log_prob(y_split)
+        return (y, log_det_jac, y_split) if return_latent else (y, log_det_jac, None)
 
     def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
         """Transforms y tensor of shape [B, C, H, W] into a tensor of shape [B, 2*C, H, W]
