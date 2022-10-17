@@ -1,11 +1,13 @@
 from abc import ABC, abstractmethod
+from typing import Tuple
 
 import torch
 import torch.nn as nn
+from torch import Tensor
 
 
 class Transform(nn.Module, ABC):
-    """Base class for transformations with learnable parameters.
+    """Base class for normalizing flow transformation f: x -> y.
     """
 
     def __init__(self):
@@ -13,13 +15,29 @@ class Transform(nn.Module, ABC):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     @abstractmethod
-    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
-        """Computes f(x) and log_abs_det_jac(x)."""
+    def transform(self, x: Tensor, log_det_jac: Tensor) -> Tuple[Tensor, Tensor]:
+        """Computes f(x) and log_abs_det_jac(x).
+
+        Args:
+            x: Input tensor.
+            log_det_jac: Ongoing log abs determinant of jacobian.
+
+        Returns:
+            y: Forward transformed input.
+            log_det_jac: log abs determinant of jacobian matrix of the transformation.
+        """
         ...
 
     @abstractmethod
-    def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
-        """Computes f^-1(y) and inv_log_abs_det_jac(y)."""
+    def invert(self, y: Tensor) -> Tensor:
+        """Computes f^{-1}(y).
+
+        Args:
+            y: Input tensor.
+
+        Returns:
+            inv_y: Inverse transformed input.
+        """
         ...
 
 
@@ -28,11 +46,10 @@ class Prior(ABC):
     """
 
     def __init__(self):
-        """Initializes the prior distribution."""
         super(Prior, self).__init__()
 
     @abstractmethod
-    def sample(self, shape: torch.Size) -> torch.tensor:
+    def sample(self, shape: tuple) -> Tensor:
         """Samples from the prior distribution.
 
         Args:
@@ -44,7 +61,7 @@ class Prior(ABC):
         ...
 
     @abstractmethod
-    def compute_log_prob(self, x: torch.tensor):
+    def compute_log_prob(self, x: Tensor) -> Tensor:
         """Computes the log density of the given tensor of shape [B, D] where B is the batch size.
 
         Args:

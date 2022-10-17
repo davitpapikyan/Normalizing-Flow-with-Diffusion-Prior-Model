@@ -70,7 +70,7 @@ class MapDataset(Dataset):
 
 
 class FIDDataset(Dataset):
-    """Given a dataset or torch.Tensor, creates a dataset to feed torch_fidelity to calculate FID.
+    """Given a dataset or Tensor, creates a dataset to feed torch_fidelity to calculate FID.
     """
 
     def __init__(self, dataset):
@@ -87,8 +87,8 @@ def calculate_fid(input1, input2, device) -> float:
     """Calculates FID score.
 
     Args:
-        input1: Either torch.Tensor or dataset.
-        input2: Either torch.Tensor or dataset.
+        input1: Either Tensor or dataset.
+        input2: Either Tensor or dataset.
         device: Device.
 
     Returns:

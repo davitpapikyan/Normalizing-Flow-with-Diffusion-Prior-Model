@@ -11,7 +11,7 @@ from .glow import StepFlow, GlowBlock, Glow
 from .transforms import InvConv2d, InvConv2dLU, ActNorm, AffineCoupling, Squeeze, Split
 from .prior import GaussianPrior
 from .utils import init_optimizer, track_images, save_images, preprocess_batch, postprocess_batch, calculate_loss, \
-    get_data_transforms
+    get_data_transforms, calculate_output_shapes
 from aim import Distribution, Text
 
 # TODO: (on hold) Add variational dequatization.
@@ -86,7 +86,6 @@ def calculate_bpd(flow, prior_dist, apply_dequantization: bool, data_loader, n_b
         sample_log_likelihoods = []
         for _ in range(num_imp_samples):  # Importance sampling.
             ll = torch.zeros(batch.size(0), device=device)
-            # _, ll = flow.transform(batch if apply_dequantization else batch + torch.rand_like(batch) / n_bins, ll)
 
             latents, ll = flow.transform(batch if apply_dequantization else batch + torch.rand_like(batch) / n_bins, ll)
             ll += sum(prior_dist.compute_log_prob(z) for z in latents)
@@ -184,6 +183,7 @@ def train(flow, prior_dist, logger, experiment_name, exp_output_dir, data_root, 
     bpd_const = np.log2(np.e) / n_pixel
 
     running_loss = 0.0
+    latent_dimensions = calculate_output_shapes(L=flow.L, in_channel=flow.in_channel, size=img_size)
     logger.info("Starting the training.\n")
     flow.train()
 
@@ -202,21 +202,16 @@ def train(flow, prior_dist, logger, experiment_name, exp_output_dir, data_root, 
             log_likelihood = torch.zeros(batch.size(0), device=device)
             latents, log_likelihood = flow.transform(batch if apply_dequantization else
                                                      batch + torch.rand_like(batch) / n_bins, log_likelihood)
-            # log_likelihood += sum(prior_dist.compute_log_prob(z) for z in latents)  # Prior log probability.
-            for z in latents:
-                print(prior_dist.compute_log_prob(z))
-                log_likelihood += prior_dist.compute_log_prob(z)
+            log_likelihood += sum(prior_dist.compute_log_prob(z) for z in latents)  # Prior log probability.
 
             # See the discussion on why noise is being added in [Section 3.1,
             # A note on the evaluation of generative models] paper.
 
-            # loss = ((np.log(n_bins) * n_pixel - log_likelihood) * bpd_const).mean(dim=0)  # Bits per dimension.
             loss = calculate_loss(log_likelihood, n_bins, n_pixel)  # Bits per dimension.
             loss.backward()
             optimizer.step()
 
             running_loss += loss.item()
-            print(loss.item())
 
             if iteration % print_freq == print_freq-1:  # Print every print_freq minibatches.
                 running_loss /= print_freq
@@ -236,7 +231,8 @@ def train(flow, prior_dist, logger, experiment_name, exp_output_dir, data_root, 
                             aim_logger.track(dist, name=name, step=current_iter // print_freq)
 
                     flow.eval()
-                    generated_images, _ = flow.sample(n_samples=4, img_shape=(img_size, img_size))
+                    latents = [prior_dist.sample(shape=(4, *dim)) for dim in latent_dimensions]
+                    generated_images = flow.sample(latents)
                     track_images(aim_logger, generated_images, step=current_iter // print_freq)
                     flow.train()
 
@@ -249,7 +245,8 @@ def train(flow, prior_dist, logger, experiment_name, exp_output_dir, data_root, 
 
         # Generate and save images after each epoch.
         flow.eval()
-        generated_images, _ = flow.sample(n_samples=64, img_shape=(img_size, img_size))
+        latents = [prior_dist.sample(shape=(64, *dim)) for dim in latent_dimensions]
+        generated_images = flow.sample(latents)
         save_images(generated_images.float(), path=result_dir, name=f"generated_{epoch}")
         flow.train()
 
@@ -299,8 +296,8 @@ def train(flow, prior_dist, logger, experiment_name, exp_output_dir, data_root, 
     # logger.info(f"FID score mean: {fid}, std: {std}\n")
 
 
-    metrics = evaluate(flow, prior_dist, apply_dequantization, test_loader, flow.device, num_imp_samples, img_size, n_bits,
-                       scores=("BPD", "FID"))
+    metrics = evaluate(flow, prior_dist, apply_dequantization, test_loader, flow.device, num_imp_samples, img_size,
+                       n_bits, scores=("BPD", "FID"))
     train_bpd = calculate_bpd(flow, prior_dist, apply_dequantization, train_loader, n_bits, n_bins, n_pixel,
                               bpd_const, num_imp_samples, device)
     aim_logger.track(metrics["BPD"], name="bpd", context={"subset": "test"})
@@ -320,4 +317,4 @@ __all__ = [InvConv2d, InvConv2dLU, ActNorm, AffineCoupling, StepFlow, Squeeze, G
            get_data_transforms, train, evaluate]
 
 
-# TODO: Change all pytorch tensor type annotations to torch.Tensor
+# TODO: Refactor codes and change all pytorch tensor type annotations to Tensor!!!

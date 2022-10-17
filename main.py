@@ -39,7 +39,6 @@ def run_nf_base_experiment(configs: DictConfig):
     # L: The number of blocks (including the last blocks).
     # K: The number of StepFlows in each block.
     flow = Glow(in_channel=in_channel, L=configs.model.architecture.L, K=configs.model.architecture.K,
-                temperature=configs.model.architecture.temperature,
                 apply_dequantization=configs.model.architecture.apply_dequantization)
     flow.to(flow.device)
 

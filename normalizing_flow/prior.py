@@ -1,4 +1,4 @@
-import torch
+from torch import Tensor
 from torch.distributions import Normal
 
 from .base import Prior
@@ -17,7 +17,7 @@ class GaussianPrior(Prior):
         super(GaussianPrior, self).__init__()
         self.__prior = Normal(loc=0.0, scale=scale)
 
-    def sample(self, shape: torch.Size) -> torch.tensor:
+    def sample(self, shape: tuple) -> Tensor:
         """Samples from the prior distribution.
 
         Args:
@@ -29,7 +29,7 @@ class GaussianPrior(Prior):
         # TODO: Check if the returned tensor is on GPU, if not, add loc and scale to device.
         return self.__prior.sample(sample_shape=shape)
 
-    def compute_log_prob(self, x: torch.tensor):
+    def compute_log_prob(self, x: Tensor):
         """Computes the log density of the given tensor of shape [B, D] where B is the batch size.
 
         Args:

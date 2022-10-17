@@ -1,6 +1,9 @@
+from typing import Tuple
+
 import torch
 import torch.nn as nn
 from einops import rearrange
+from torch import Tensor
 from torch.nn.functional import conv2d
 
 from .base import Transform
@@ -14,11 +17,11 @@ class IdentityTransform(Transform):
     def __init__(self):
         super(IdentityTransform, self).__init__()
 
-    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
+    def transform(self, x: Tensor, log_det_jac: Tensor) -> Tuple[Tensor, Tensor]:
         return x, log_det_jac
 
-    def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
-        return y, inv_log_det_jac
+    def invert(self, y: Tensor) -> Tensor:
+        return y
 
 
 class ActNorm(Transform):
@@ -49,7 +52,7 @@ class ActNorm(Transform):
         # Controls the initialization.
         self.register_buffer("is_initialized", torch.tensor(0, dtype=torch.uint8, device=self.device))
 
-    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
+    def transform(self, x: Tensor, log_det_jac: Tensor) -> Tuple[Tensor, Tensor]:
         """Computes forward transformation and log abs determinant of jacobian matrix.
         The latter is computed via the formula: height * width * \sum \log(|scale|).
 
@@ -73,22 +76,17 @@ class ActNorm(Transform):
         y = torch.exp(self.scale) * x + self.bias
         return y, log_det_jac
 
-    def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
-        """Computes inverse transformation and log abs determinant of jacobian matrix.
-        The latter is computed via the formula: -height * width * \sum \log(|scale|).
+    def invert(self, y: Tensor) -> Tensor:
+        """Computes inverse transformation.
 
         Args:
             y: Input tensor of shape [B, C, H, W].
-            inv_log_det_jac: Ongoing log abs determinant of jacobian.
 
         Returns:
             inv_y: Inverse transformed input.
-            inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
         """
-        _, _, height, width = y.shape
-        inv_log_det_jac += -height * width * self.scale.sum()
         inv_y = (y - self.bias) * torch.exp(-self.scale)
-        return inv_y, inv_log_det_jac
+        return inv_y
 
 
 class InvConv2d(Transform):
@@ -109,7 +107,7 @@ class InvConv2d(Transform):
         w_init, _ = torch.linalg.qr(random_matrix)
         self.weight = nn.Parameter(rearrange(w_init, "h w -> h w () ()"))
 
-    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
+    def transform(self, x: Tensor, log_det_jac: Tensor) -> Tuple[Tensor, Tensor]:
         """Computes forward transformation and log abs determinant of jacobian matrix.
         The latter is computed via the formula: height * width * \log |det(W)|.
 
@@ -126,21 +124,18 @@ class InvConv2d(Transform):
         y = conv2d(x, self.weight)
         return y, log_det_jac
 
-    def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
-        """Computes inverse transformation and log abs determinant of jacobian matrix.
-        The latter is computed via the formula: -height * width * \log |det(W)|.
+    def invert(self, y: Tensor) -> Tensor:
+        """Computes inverse transformation.
+
         Args:
             y: Input tensor of shape [B, C, H, W].
-            inv_log_det_jac: Ongoing log abs determinant of jacobian.
 
         Returns:
             inv_y: Inverse transformed input.
-            inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
         """
         _, _, height, width = y.shape
-        inv_log_det_jac += -height * width * self.weight.squeeze().det().abs().log()
         inv_y = conv2d(y, rearrange(self.weight.squeeze().inverse(), "h w -> h w () ()"))
-        return inv_y, inv_log_det_jac
+        return inv_y
 
 
 class InvConv2dLU(Transform):
@@ -187,7 +182,7 @@ class InvConv2dLU(Transform):
 
         self.register_buffer("w_P", w_p)
 
-    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
+    def transform(self, x: Tensor, log_det_jac: Tensor) -> Tuple[Tensor, Tensor]:
         """Computes forward transformation and log abs determinant of jacobian matrix.
         The latter is computed via the formula: height * width * \log |det(W)| where
         \log |det(W)| = \sum \log(|s|).
@@ -206,24 +201,19 @@ class InvConv2dLU(Transform):
         log_det_jac += height * width * abs_log_sum(self.w_s)
         return y, log_det_jac
 
-    def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
-        """Computes inverse transformation and log abs determinant of jacobian matrix.
-        The latter is computed via the formula: -height * width * \log |det(W)| where
-        \log |det(W)| = \sum \log(|s|).
+    def invert(self, y: Tensor) -> Tensor:
+        """Computes inverse transformation.
 
         Args:
             y: Input tensor of shape [B, C, H, W].
-            inv_log_det_jac: Ongoing log abs determinant of jacobian.
 
         Returns:
             inv_y: Inverse transformed input.
-            inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
         """
         _, _, height, width = y.shape
         weight = self.__compose_weight()
         inv_y = conv2d(y, rearrange(weight.squeeze().inverse(), "h w -> h w () ()"))
-        inv_log_det_jac += -height * width * abs_log_sum(self.w_s)
-        return inv_y, inv_log_det_jac
+        return inv_y
 
     def __compose_weight(self):
         """Creates weight matrix via the formula W = P @ L @ (U + diag(s)).
@@ -253,7 +243,7 @@ class AffineCoupling(Transform):
         self.net = coupling_network(in_channels=in_channels, n_features=n_features).to(self.device)
         self.scaling_factor = nn.Parameter(torch.zeros(in_channels))
 
-    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
+    def transform(self, x: Tensor, log_det_jac: Tensor) -> Tuple[Tensor, Tensor]:
         """Computes forward transformation and log abs determinant of jacobian matrix.
 
         Args:
@@ -275,16 +265,14 @@ class AffineCoupling(Transform):
         log_det_jac += scale.view(x.size(0), -1).sum(dim=1)
         return inv_y, log_det_jac
 
-    def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
-        """Computes inverse transformation and log abs determinant of jacobian matrix.
+    def invert(self, y: Tensor) -> Tensor:
+        """Computes inverse transformation.
 
         Args:
             y: Input tensor of shape [B, C, H, W].
-            inv_log_det_jac: Ongoing log abs determinant of jacobian.
 
         Returns:
             inv_y: Inverse transformed input.
-            inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
         """
         y_a, y_b = y.chunk(2, dim=1)
         log_scale, bias = self.net(y_a).chunk(2, dim=1)
@@ -294,8 +282,7 @@ class AffineCoupling(Transform):
 
         inv_y_a, inv_y_b = y_a, y_b * torch.exp(-scale) - bias
         inv_y = torch.concat([inv_y_a, inv_y_b], dim=1)
-        inv_log_det_jac += -scale.view(y.size(0), -1).sum(dim=1)
-        return inv_y, inv_log_det_jac
+        return inv_y
 
 
 class Squeeze(Transform):
@@ -306,7 +293,7 @@ class Squeeze(Transform):
         """Initializes squeeze flow."""
         super(Squeeze, self).__init__()
 
-    def transform(self, x: torch.tensor, log_det_jac: torch.tensor):
+    def transform(self, x: Tensor, log_det_jac: Tensor) -> Tuple[Tensor, Tensor]:
         """Transforms x tensor of shape [B, C, H, W] into a tensor of shape [B, 4C, H//2, W//2].
         Not that the log abs determinant is 0.
 
@@ -321,64 +308,53 @@ class Squeeze(Transform):
         y = rearrange(x, 'b c (h h1) (w w1) -> b (c h1 w1) h w', h1=2, w1=2)
         return y, log_det_jac
 
-    def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
+    def invert(self, y: Tensor) -> Tensor:
         """Transforms y tensor of shape [B, C, H, W] into a tensor of shape [B, C//4, H*2, W*2].
-        Not that the log abs determinant is 0.
 
         Args:
             y: Input tensor of shape [B, C, H, W].
-            inv_log_det_jac: Ongoing log abs determinant of jacobian.
 
         Returns:
             inv_y: Inverse transformed input.
-            inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
         """
         inv_y = rearrange(y, 'b (c c1 c2) h w -> b c (h c1) (w c2)', c1=2, c2=2)
-        return inv_y, inv_log_det_jac
+        return inv_y
 
 
 class Split(Transform):
     """Implements split operation on images."""
 
-    def __init__(self, prior):
+    def __init__(self):
         """Initializes prior distribution.
-
-        Args:
-            prior: Initialized prior distribution.
         """
         super(Split, self).__init__()
-        self.__prior = prior  # TODO: Delete prior
 
-    def transform(self, x: torch.tensor, log_det_jac: torch.tensor, return_latent: bool = False):
+    def transform(self, x: Tensor, log_det_jac: Tensor) -> Tuple[Tensor, Tensor]:
         """Transforms x tensor of shape [B, C, H, W] into a tensor of shape [B, C//2, H, W]
         by splitting it channel-wise. Log determinant is computed for the second part of split.
 
         Args:
             x: Input tensor of shape [B, C, H, W].
             log_det_jac: Ongoing log abs determinant of jacobian.
-            return_latent: Either to return latent variable or not.
 
         Returns:
             y: Forward transformed input.
             log_det_jac: log abs determinant of jacobian matrix of the transformation.
+            z: Latent variable.
         """
         y, y_split = x.chunk(2, dim=1)
-        # log_det_jac += self.__prior.compute_log_prob(y_split)
-        return (y, log_det_jac, y_split) if return_latent else (y, log_det_jac, None)
+        return y, log_det_jac, y_split
 
-    def invert(self, y: torch.tensor, inv_log_det_jac: torch.tensor):
+    def invert(self, y: Tensor, inv_y_split: Tensor = None) -> Tensor:
         """Transforms y tensor of shape [B, C, H, W] into a tensor of shape [B, 2*C, H, W]
-        by sampling from the prior distribution.
+        by concatenating with sampled latent variable.
 
         Args:
             y: Input tensor of shape [B, C, H, W].
-            inv_log_det_jac: Ongoing log abs determinant of jacobian.
+            inv_y_split: Latent variable.
 
         Returns:
             inv_y: Inverse transformed input.
-            inv_log_det_jac: log abs determinant of jacobian matrix of the inverse transformation.
         """
-        inv_y_split = self.__prior.sample(y.size())
         inv_y = torch.concat([y, inv_y_split], dim=1)
-        inv_log_det_jac += -self.__prior.compute_log_prob(inv_y_split)
-        return inv_y, inv_log_det_jac
+        return inv_y

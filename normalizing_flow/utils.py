@@ -7,11 +7,13 @@ import torch
 import torch.nn as nn
 import torchvision.utils as vutils
 from PIL import Image
+from torch import Tensor
 from torchvision import transforms as vision_tranforms
+
 from data import discretize
 
 
-def abs_log_sum(x: torch.tensor) -> torch.tensor:
+def abs_log_sum(x: Tensor) -> Tensor:
     """Computes sum(log|x+eps|).
 
     Args:
@@ -215,7 +217,7 @@ def postprocess_batch(batch, n_bins, apply_dequantization=False):
 
 
 @torch.no_grad()
-def track_images(aim_logger, images: torch.tensor, step: int = None, epoch: int = None, context: dict = None) -> None:
+def track_images(aim_logger, images: Tensor, step: int = None, epoch: int = None, context: dict = None) -> None:
     """Adds images to aim to be tracked.
 
     Args:
@@ -233,7 +235,7 @@ def track_images(aim_logger, images: torch.tensor, step: int = None, epoch: int 
 
 
 @torch.no_grad()
-def save_images(images: torch.tensor, path: str, name: str) -> None:
+def save_images(images: Tensor, path: str, name: str) -> None:
     """Plots and saves 64 images.
 
     Args:
@@ -250,7 +252,7 @@ def save_images(images: torch.tensor, path: str, name: str) -> None:
     )
 
 
-def calculate_loss(log_likelihood: torch.Tensor, n_bins: float, n_pixel: float):
+def calculate_loss(log_likelihood: Tensor, n_bins: float, n_pixel: float):
     """Calculates bits per dimension (BPD) loss.
 
     Args:
