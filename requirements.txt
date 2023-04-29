@@ -1,0 +1,13 @@
+aim==3.13.2
+clean-fid==0.1.35
+denoising-diffusion-pytorch==0.31.1
+einops==0.5.0
+hydra-colorlog==1.2.0
+hydra-core==1.2.0
+matplotlib==3.6.0
+openai-clip==1.0.1
+pandas==1.4.4
+Pillow==9.2.0
+pytorch-ignite==0.4.10
+scikit-image==0.19.3
+scikit-learn==1.1.2

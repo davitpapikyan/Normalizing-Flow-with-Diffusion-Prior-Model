@@ -1,0 +1,83 @@
+##################################################
+### Normalizing Flow experiment configurations ###
+##################################################
+experiment_name: "glow_MNIST"
+seed: 42
+phase: "train"  # One of ['train', 'eval'].
+# In case of 'eval', make sure to provide resume_exp_dir resume_epoch in order to load model parameters.
+
+load:
+  load_exp_dir: null  # The directory of experiment to load the model.
+  # load_exp_dir has the form of ${experiment_name}_${%Y-%m-%d_%H-%M-%S}.
+  load_epoch: 0  # How many epochs the model has been trained. It is also used to identify model parameters to load.
+
+
+data:
+  name: "cifar10"  # One of ['MNIST', 'cifar10', 'celeba', 'imagenet32'].
+  root: "./datasets"
+  batch_size: 2
+  num_workers: 0
+  img_size: 32  # The image size to crop. Always use 32 for cifar10.
+  digits: null  # Only applicable to MNIST dataset, specifies the digits to be selected.
+  transformations: ["RandomHorizontalFlip"]  # Currently, supported transformations: ["RandomHorizontalFlip"].
+
+
+model:
+  architecture:
+    L: 3  # The number of blocks (including the last blocks).
+    K: 2  # The number of StepFlows in each block.
+    learn_prior_mean_logs: True  # Whether to learn mean and covariance of Gaussian prior (also used in split transform).
+
+  training:
+    epochs: 3  # The number of epochs to train or continue training.
+    print_freq: 1
+    save_checkpoint_freq: 3
+    n_bits: 5
+    temperature: 1.0  # Temperature parameter for sampling.
+
+  logging:  # For Aim logger.
+    log_param_distribution: False  # Either to log model parameters' densities or not.
+    log_gen_images_per_iter: 2  # Per how many logging iterations (* print_freq) to log generated images.
+
+  evaluation:
+    metrics:
+      # Remove a metric to not evaluate it.
+      FID:
+        # The below pairs of lists should have the same length as argument are applied correspondingly.
+        # Make sure to have precomputed statistics for all the configurations.
+        mode: ["legacy_tensorflow"]
+        model_name: ["inception_v3"]
+      KID:
+        # See the comment for FID. Note that KID is not supported by cleanfid for cifar10.
+        mode: []
+        model_name: []
+#      SSIM_and_PSNR:
+#        data_range: 255
+  optimizer:
+    type: "adam"
+    lr: 1e-3
+
+
+############################
+### Hydra configurations ###
+############################
+hydra:
+  run:
+     dir: outputs/${experiment_name}_${now:%Y-%m-%d_%H-%M-%S}
+
+defaults:
+  - override hydra/job_logging: colorlog
+  - override hydra/hydra_logging: colorlog
+
+
+
+
+#metrics:
+#  FID:
+#    # The below pairs of lists should have the same length as argument are applied correspondingly.
+#    # Make sure to have precomputed statistics for all the configurations.
+#    mode: ["legacy_tensorflow", "clean", "clean"]
+#    model_name: ["inception_v3", "clip_vit_b_32", "inception_v3"]
+#  KID:
+#    mode: ["legacy_tensorflow", "clean"]
+#    model_name: ["inception_v3", "clip_vit_b_32"]

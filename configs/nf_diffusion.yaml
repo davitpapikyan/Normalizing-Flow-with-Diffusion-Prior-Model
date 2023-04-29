@@ -1,0 +1,92 @@
+##################################################
+##### Normalizing Flow with Diffusion Prior ######
+##################################################
+experiment_name: "glow_diffusion_MNIST"
+seed: 42
+phase: "train"  # One of 'train' and 'eval'.
+
+data:
+  name: "cifar10"  # One of ['MNIST', 'cifar10', 'celeba'].
+  root: "./datasets"
+  batch_size: 2
+  num_workers: 0
+  img_size: 32  # The image size to crop. Always use 32 for cifar10.
+  digits: null  # Only applicable to MNIST dataset, specifies the digits to be selected.
+  transformations: ["RandomHorizontalFlip"]  # Currently, supported transformations: ["RandomHorizontalFlip"].
+
+
+model:
+  normalizing_flow:
+    init_nf:
+      mode: "pretrain"  # One of 'pretrain' and 'scratch'.
+      # Either initialize NF from pretrain weights or start training from scratch.
+      pretrain:
+        dir: "glow_TEST_2022-11-28_14-10-16"  # ${experiment_name}_${%Y-%m-%d_%H-%M-%S}
+        epoch: 30  # The epoch to load.
+#      scratch:
+#        L: 3  # The number of blocks (including the last blocks).
+#        K: 2  # The number of StepFlows in each block.
+#        LU_decomposed:
+#         flow_coupling:
+    freeze: True  # Whether to freeze Normalizing Flow or train.
+    temperature: 1.0  # Temperature parameter for sampling.
+    lr: null  # Normalizing Flow learning rate, is used when freeze=False.
+    latent_formater: "IdentityFormater"  # One of 'IdentityFormater' and 'CatFormater'.
+
+  unet:
+    dim: 64  # The starting channels. The following channels multiples of dim defined by dim_mults.
+    dim_mults: [1,2,4,8]  # A tuple specifying the scaling factors of channels.
+    resnet_block_groups: 8  # The number of residual blocks.
+    learned_sinusoidal_cond: False  # Either to use random sinusoidal positional embeddings or not.
+    random_fourier_features: False  # Either to learn positional embeddings or not.
+    learned_sinusoidal_dim: 16  # The dimension of positional embeddings.
+
+  diffusion:
+    timesteps: 1000  # The number of diffusion timesteps.
+    sampling_timesteps: 100  # The number of inference timesteps.
+    loss_type: "l1"  # One of 'l1' and 'l2'.
+    beta_schedule: "cosine"  # One of 'cosine' and 'linear'.
+    ddim_sampling_eta: 1.0
+
+  training:
+    epochs: 3  # The number of epochs to train or continue training.
+    print_freq: 1 # 25
+    save_checkpoint_freq: 3 # set 5
+    n_bits: 5
+    temperature: 1.0  # Temperature parameter for sampling.
+
+  logging: # For Aim logger.
+    log_param_distribution: False  # Either to log model parameters' densities or not.
+    log_gen_images_per_iter: 20  # Per how many logging iterations (* print_freq) to log generated images.
+
+  evaluation:
+    metrics:
+      # Remove a metric to not evaluate it.
+      FID:
+        # The below pairs of lists should have the same length as argument are applied correspondingly.
+        # Make sure to have precomputed statistics for all the configurations.
+        mode: [ "legacy_tensorflow" ]
+        model_name: [ "inception_v3" ]
+      KID:
+        # See the comment for FID. Note that KID is not supported by cleanfid for cifar10.
+        mode: []
+        model_name: []
+#      SSIM_and_PSNR:
+#        data_range: 255
+
+  optimizer:
+    type: "adam"
+    lr: 1e-3
+
+
+############################
+### Hydra configurations ###
+############################
+hydra:
+  run:
+     dir: outputs/${experiment_name}_${now:%Y-%m-%d_%H-%M-%S}
+
+# @package _global_
+defaults:
+  - override hydra/job_logging: colorlog
+  - override hydra/hydra_logging: colorlog
