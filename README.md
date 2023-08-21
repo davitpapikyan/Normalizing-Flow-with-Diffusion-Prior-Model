@@ -4,7 +4,7 @@
     <img src="./media/nfdpm.jpg" width="600" height="400">
 </p>
 
-Welcome to the repository for my master thesis project at Technical University of Munich (TUM), titled "Diffusion Models as Latent Priors in Generative Models ". This project aims to explore the use of Normalizing Flows and Diffusion Probabilistic Models for efficient and accurate data sampling, which is a crucial task in many machine learning applications. The Normalizing Flow with Diffusion Prior Model (NFDPM) combines the strengths of both models and offers promising results for high-dimensional data synthesis. This repository contains the implementation of the NFDPM along with the experimental results and evaluations on various benchmark datasets.
+Welcome to the repository for my Master's thesis project at Technical University of Munich (TUM), titled "Diffusion Models as Latent Priors in Generative Models ". This project aims to explore the use of Normalizing Flows and Diffusion Probabilistic Models for efficient and accurate data sampling, which is a crucial task in many machine learning applications. The Normalizing Flow with Diffusion Prior Model (NFDPM) combines the strengths of both models and offers promising results for high-dimensional data synthesis. This repository contains the implementation of the NFDPM along with the experimental results and evaluations on various benchmark datasets. Access my Master's thesis [here](https://drive.google.com/file/d/1aB2blhGClNXGCDlN7wZvG8Nw4Wqr3lNt/view?usp=sharing). Feedback is always welcome!
 
 
 ![](./media/mnist.gif)
